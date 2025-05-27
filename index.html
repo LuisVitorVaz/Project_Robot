@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Carinha Animada</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: green; /* Fundo verde */
+        }
+        canvas {
+            display: block;
+            margin: 0 auto;
+            background-color: #fffacd;
+        }
+
+        #inputContainer {
+            text-align: center;
+            margin: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div id="inputContainer">
+        <label for="expressionInput">Digite "ola" para mudar a expressão:</label>
+        <input type="text" id="expressionInput" placeholder="Digite aqui...">
+    </div>
+    <canvas id="smileyCanvas" width="400" height="400"></canvas>
+
+    <script src="index.js"></script>
+</body>
+</html>
