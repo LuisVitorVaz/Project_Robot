@@ -1,132 +1,123 @@
 #include <Arduino.h>
 #include <math.h> // Para sqrt() e acos()
 
-#define SENSOR1 A0
-#define SENSOR2 A1
+#define MIC1_PIN A0
+#define MIC2_PIN A1
 
-// LEDs de 45 graus
-#define LED_45_ESQ_FRENTE 5
-#define LED_45_DIR_FRENTE 2
-#define LED_45_ESQ_TRAS 4
-#define LED_45_DIR_TRAS 3
+const int ledPins[8] = {2, 3, 4, 5, 6, 7, 8, 9};
+const int numSamples = 100;
+int mic1[numSamples];
+int mic2[numSamples];
 
-// LEDs principais
-#define LED_ESQUERDA 8
-#define LED_DIREITA 9
-#define LED_FRENTE 10
-#define LED_ATRAS 11
-int valor1 = 0;
-int valor2 = 0;
-float theta = 0;
-double media_valores1[20] = {0};
-double media_valores2[20] = {0};
-int cont = 0;
+const float micDistance = 0.2;
+const float soundSpeed = 343.0;
+const int sampleRate = 5000;
+const float dt = 1.0 / sampleRate;
 
-double max1 = 0;
-double max2 = 0;
+// Ajuste de sensibilidade
+const float gainMic1 = 1.0;
+const float gainMic2 = 0.9;
 
-void apaga_leds() {
-  digitalWrite(LED_ESQUERDA, LOW);
-  digitalWrite(LED_DIREITA, LOW);
-  digitalWrite(LED_FRENTE, LOW);
-  digitalWrite(LED_ATRAS, LOW);
-  digitalWrite(LED_45_ESQ_FRENTE, LOW);
-  digitalWrite(LED_45_DIR_FRENTE, LOW);
-  digitalWrite(LED_45_ESQ_TRAS, LOW);
-  digitalWrite(LED_45_DIR_TRAS, LOW);
-}
-
-void detectar_picos() {
-  // Detecta pico local baseado em mudança de sinal na derivada
-  max1 = media_valores1[0];
-  max2 = media_valores2[0];
-
-  for (int i = 1; i < 19; i++) {
-    double d1 = media_valores1[i] - media_valores1[i - 1];
-    double d2 = media_valores1[i + 1] - media_valores1[i];
-    if (d1 > 0 && d2 < 0 && media_valores1[i] > max1) {
-      max1 = media_valores1[i];
-    }
-
-    d1 = media_valores2[i] - media_valores2[i - 1];
-    d2 = media_valores2[i + 1] - media_valores2[i];
-    if (d1 > 0 && d2 < 0 && media_valores2[i] > max2) {
-      max2 = media_valores2[i];
-    }
-  }
-
-  Serial.print("Pico detectado Sensor 1: ");
-  delay(100);
-  Serial.println(max1);
-  Serial.print("Pico detectado Sensor 2: ");
-  delay(100);
-  Serial.println(max2);
-}
-
-void calcular_theta_e_acender_led() {
-  apaga_leds();
-
-  if (max1 > 0 && max2 > 0) {
-    theta = atan2(max2, max1);  // agora theta considera os 2 quadrantes
-    if (theta < 0) theta += 2 * PI;
-
-    Serial.print("Theta (radianos): ");
-    Serial.println(theta);
-
-    // Mapeamento com base no círculo
-    if (theta < PI / 8 || theta > 15 * PI / 8) {
-      digitalWrite(LED_FRENTE, HIGH);
-    } else if (theta < 3 * PI / 8) {
-      digitalWrite(LED_45_DIR_FRENTE, HIGH);
-    } else if (theta < 5 * PI / 8) {
-      digitalWrite(LED_DIREITA, HIGH);
-    } else if (theta < 7 * PI / 8) {
-      digitalWrite(LED_45_DIR_TRAS, HIGH);
-    } else if (theta < 9 * PI / 8) {
-      digitalWrite(LED_ATRAS, HIGH);
-    } else if (theta < 11 * PI / 8) {
-      digitalWrite(LED_45_ESQ_TRAS, HIGH);
-    } else if (theta < 13 * PI / 8) {
-      digitalWrite(LED_ESQUERDA, HIGH);
-    } else {
-      digitalWrite(LED_45_ESQ_FRENTE, HIGH);
-    }
-  } else {
-    Serial.println("Erro: valores inválidos para cálculo de theta");
-  }
-}
+// 👇 Protótipos das funções usadas no loop()
+int getLEDIndex(float angle);
+void acendeLED(int index);
 
 void setup() {
-  Serial.begin(9600);
-
-  pinMode(LED_ESQUERDA, OUTPUT);
-  pinMode(LED_DIREITA, OUTPUT);
-  pinMode(LED_FRENTE, OUTPUT);
-  pinMode(LED_ATRAS, OUTPUT);
-  pinMode(LED_45_ESQ_FRENTE, OUTPUT);
-  pinMode(LED_45_DIR_FRENTE, OUTPUT);
-  pinMode(LED_45_ESQ_TRAS, OUTPUT);
-  pinMode(LED_45_DIR_TRAS, OUTPUT);
+  for (int i = 0; i < 8; i++) {
+    pinMode(ledPins[i], OUTPUT);
+    digitalWrite(ledPins[i], LOW);
+  }
+  Serial.begin(115200);
 }
-
+// Acende apenas o LED do setor indicado
+void acendeLED(int index) {
+  for (int i = 0; i < 8; i++) {
+    digitalWrite(ledPins[i], (i == index) ? HIGH : LOW);
+  }
+}
 void loop() {
-   valor1 = analogRead(SENSOR1);
-   valor2 = analogRead(SENSOR2);
-
-  media_valores1[cont] = valor1;
-  media_valores2[cont] = valor2;
-  cont++;
-  Serial.println("vslor do cont");
-  Serial.println(cont);
-
-  if (cont == 20) {
-    detectar_picos();
-    calcular_theta_e_acender_led();
-
-    cont = 0;
-    max1 = 0;
-    max2 = 0;
+  // 1. Captura de amostras
+  for (int i = 0; i < numSamples; i++) {
+    mic1[i] = analogRead(MIC1_PIN);
+    mic2[i] = analogRead(MIC2_PIN);
+    delayMicroseconds(200); // 5kHz
   }
 
-  delay(2); // Pequeno delay para taxa de aquisição estável
+  // 2. Remoção de offset DC (normalização)
+  long sum1 = 0, sum2 = 0;
+  for (int i = 0; i < numSamples; i++) {
+    sum1 += mic1[i];
+    sum2 += mic2[i];
+  }
+  int mean1 = sum1 / numSamples;
+  int mean2 = sum2 / numSamples;
+
+  for (int i = 0; i < numSamples; i++) {
+    mic1[i] = (mic1[i] - mean1) * gainMic1;
+    mic2[i] = (mic2[i] - mean2) * gainMic2;
+  }
+
+  // 3. Verificação de amplitude mínima (filtro de ruído)
+  long totalAmp = 0;
+  for (int i = 0; i < numSamples; i++) {
+    totalAmp += abs(mic1[i]) + abs(mic2[i]);
+  }
+  int avgAmp = totalAmp / (2 * numSamples);
+  if (avgAmp < 10) return; // Ignora se o som for muito fraco
+
+  // 4. Correlação cruzada para achar defasagem
+  int maxLag = 10;
+  int bestLag = 0;
+  long bestCorr = 0;
+
+  for (int lag = -maxLag; lag <= maxLag; lag++) {
+    long corr = 0;
+    for (int i = 0; i < numSamples - abs(lag); i++) {
+      int j = i + lag;
+      if (j < 0 || j >= numSamples) continue;
+      corr += (long)mic1[i] * (long)mic2[j];
+    }
+
+    if (abs(corr) > abs(bestCorr)) {
+      bestCorr = corr;
+      bestLag = lag;
+    }
+  }
+
+  // 5. Cálculo do ângulo estimado
+  float deltaT = bestLag * dt;
+  float ratio = (soundSpeed * deltaT) / micDistance;
+  ratio = constrain(ratio, -1.0, 1.0); // Limita para evitar erros no asin()
+  float angle = asin(ratio) * 180.0 / PI;
+
+  // 6. Margem de erro de 10 graus (considera "frente")
+  if (abs(angle) < 10.0) angle = 0.0;
+
+  // 7. Determina qual LED acender com base no ângulo
+  int ledIndex = getLEDIndex(angle);
+
+  // 8. Acende o LED correspondente
+  acendeLED(ledIndex);
+
+  // 9. Debug serial
+  Serial.print("Ângulo estimado: ");
+  Serial.print(angle);
+  Serial.print("°, LED: ");
+  Serial.println(ledIndex);
+
+  delay(100); // Pequena pausa
 }
+
+// Mapeia o ângulo estimado para um dos 8 LEDs (cada 45°)
+int getLEDIndex(float angle) {
+  if (angle >= -22.5 && angle < 22.5) return 0;     // 0°
+  if (angle >= 22.5 && angle < 67.5) return 1;      // 45°
+  if (angle >= 67.5 && angle < 112.5) return 2;     // 90°
+  if (angle >= 112.5 && angle < 157.5) return 3;    // 135°
+  if (angle >= 157.5 || angle < -157.5) return 4;   // 180° ou -180°
+  if (angle >= -157.5 && angle < -112.5) return 5;  // -135°
+  if (angle >= -112.5 && angle < -67.5) return 6;   // -90°
+  if (angle >= -67.5 && angle < -22.5) return 7;    // -45°
+  return 0; // Fallback (caso extremo)
+}
+
