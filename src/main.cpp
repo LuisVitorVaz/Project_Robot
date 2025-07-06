@@ -105,15 +105,15 @@ void imprimir_amostras() {
   }
 }
 
-void encontrar_maior(const float *vetor, int tamanho, float *maior_destino) {
-  *maior_destino = vetor[0];
-  for (int i = 1; i < tamanho; i++) {
-    if (vetor[i] >= *maior_destino) {
-      *maior_destino = vetor[i];
-      maior_indice_do_vetor=i;
-    }
-  }
-}
+// void encontrar_maior(const float *vetor, int tamanho, float *maior_destino) {
+//   *maior_destino = vetor[0];
+//   for (int i = 1; i < tamanho; i++) {
+//     if (vetor[i] >= *maior_destino) {
+//       *maior_destino = vetor[i];
+//       maior_indice_do_vetor=i;
+//     }
+//   }
+// }
 
 void normalizar_vetor(const float *vetor, float *vetor_norm, int tamanho, float normalizar) {
   for (int i = 0; i < tamanho; i++) {
@@ -145,8 +145,8 @@ void correlacao_cruzada(const float *mic1, const float *mic2, float *resultado) 
 }
 void equacao_final(){
   // equation of function
-  // angulo_theta =(0.00339*(pow(max_val,2.0))+(0.25*(pow(max_val,1.0)))-5.71);
-  angulo_theta= 45*(max_index);
+  angulo_theta =(0.00476*(pow(max_index,2.0))+(1.05*(pow(max_index,1.0)))-61.5);
+  // angulo_theta= 45*(max_index);
   Serial.print("valor da funcao e \n");
   Serial.print(max_index);
 }
@@ -176,22 +176,24 @@ void acender_led()
     digitalWrite(LED_ESQUERDA, LOW);
     digitalWrite(LED_45_ESQ_FRENTE, LOW);
 
-    // Acionar LED baseado no índice do pico (direção do som)
-    if (indice_mais_proximo == 4) {
-        digitalWrite(LED_ESQUERDA, HIGH);       // Ângulo -180°
-    } else if (indice_mais_proximo == 3) {
-        digitalWrite(LED_ATRAS, HIGH);       // Ângulo -90°
-    } else if (indice_mais_proximo == 2) {
-        digitalWrite(LED_45_ESQ_TRAS, HIGH);   // Ângulo -135°
-    } else if (indice_mais_proximo == 1) {
-        digitalWrite(LED_45_DIR_FRENTE, HIGH);  // Ângulo -45°
-    } else if (indice_mais_proximo == 0) {
-        digitalWrite(LED_45_ESQ_FRENTE, HIGH);  // Ângulo 0°
-    } else {
-        digitalWrite(LED_ATRAS, HIGH);          // Ângulo intermediário
-    }
+  // Acionar LED baseado no índice do pico (direção do som) com margem de erro ±2
+  if (indice_mais_proximo >= 22 && indice_mais_proximo <= 26)
+  {
+      digitalWrite(LED_ESQUERDA, HIGH);       // Ângulo -180°
 
-   
+  } 
+  else if (indice_mais_proximo >= 9 && indice_mais_proximo <= 13) {
+      digitalWrite(LED_ATRAS, HIGH);          // Ângulo -90°
+  } 
+  else if (indice_mais_proximo >= 6 && indice_mais_proximo <= 10) {
+      digitalWrite(LED_45_ESQ_TRAS, HIGH);    // Ângulo -135°
+  }
+  else if (indice_mais_proximo >= 14 && indice_mais_proximo <= 18) {
+      digitalWrite(LED_45_DIR_FRENTE, HIGH);  // Ângulo -45°
+  } 
+  else if (indice_mais_proximo >= 63 && indice_mais_proximo <= 67) {
+      digitalWrite(LED_45_ESQ_FRENTE, HIGH);  // Ângulo 0°
+  } 
 }
 void detectar_angulo(float correlacao[81]) {
   
@@ -199,7 +201,7 @@ void detectar_angulo(float correlacao[81]) {
 
     // Encontrar índice do pico da correlação
     for (i = 1; i < 81; i++) {
-        if (correlacao[i] > max_val) {
+        if (correlacao[i] >= max_val) {
             max_val = correlacao[i];
             max_index = i;
         }
@@ -232,7 +234,6 @@ void loop() {
     coleta_amostras();
     imprimir_amostras();
 
-
     normalizar_vetor(mic1, vetor1_norm, 20, maior_mic1);
     normalizar_vetor(mic2, vetor2_norm, 100, maior_mic2);
 
@@ -240,9 +241,8 @@ void loop() {
     imprimir_vetor_normalizado(vetor2_norm, 100, "mic2");
 
     correlacao_cruzada(vetor1_norm,vetor2_norm, correlacao_resultado);
-
-
-    encontrar_maior(correlacao_resultado,100, &maior_mic1);
+    detectar_angulo(correlacao_resultado);
+    // encontrar_maior(correlacao_resultado,100, &maior_mic1);
     // encontrar_maior(mic2, 100, &maior_mic2);
 
     Serial.print("Maior valor do vetor correlacao: ");
@@ -262,7 +262,8 @@ void loop() {
   // }
       coleta_amostras_grande(cont);
       cont++;
-      detectar_angulo(correlacao_resultado);
+      // na funcao detectar angulo e preciso fazer a seguinte coisa 
+      // de acordo com a posicao encontrada no vetor mostrar qual e a direcao que aquele valore representa
       equacao_final();
       acender_led_mais_proximo();
         
