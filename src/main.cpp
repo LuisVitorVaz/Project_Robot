@@ -43,14 +43,6 @@ const int ledPin = 2;
 #define frequenciaM4 300
 #define resolucao 8          // Resolução de 8 bits (0 a 255)
 
-
-// const int motor1Pin1 = 12, 
-// const int motor1Pin2 = 13; // Frente esquerda
-// const int motor2Pin1 = 14, motor2Pin2 = 27; // Frente direita
-// const int motor3Pin1 = 32, motor3Pin2 = 33; // Trás esquerda
-// const int motor4Pin1 = 25, motor4Pin2 = 26; // Trás direita
-
-
 // Página HTML com botões de controle usando imagens Base64
 const char htmlPage[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -177,6 +169,11 @@ const char htmlPage[] PROGMEM = R"rawliteral(
 </body>
 </html>
 )rawliteral";
+void piscarLED() {
+  digitalWrite(ledPin, HIGH);
+  delay(100);
+  digitalWrite(ledPin, LOW);
+}
 void parar() {
   // Desligar todos os motores
   ledcWrite(0, 0);  // 0% duty no motor1
@@ -193,6 +190,10 @@ void parar() {
 
 // Controle dos motores
 void moverParaFrente() {
+    piscarLED();
+  unsigned long tempoInicial = millis();
+  while (millis() - tempoInicial < 10)
+  {
   ledcWrite(0, 0);  // 0% duty no motor1
   ledcWrite(1, 0);  // 0% duty no motor1
   ledcWrite(2, 0);  // 0% duty no motor1
@@ -201,64 +202,89 @@ void moverParaFrente() {
   ledcWrite(5, 256);  // 100% duty no motor1
   ledcWrite(6, 256);  // 100% duty no motor1
   ledcWrite(7, 256);  // 100% duty no motor1
-
+  }
+  ledcWrite(0, 0);  // 0% duty no motor1
+  ledcWrite(1, 0);  // 0% duty no motor1
+  ledcWrite(2, 0);  // 0% duty no motor1
+  ledcWrite(3, 0);  // 0% duty no motor1
+  ledcWrite(4, 200);  // 100% duty no motor1
+  ledcWrite(5, 200);  // 100% duty no motor1
+  ledcWrite(6, 200);  // 100% duty no motor1
+  ledcWrite(7, 200);  // 100% duty no motor1
   Serial.println("Movendo para frente");
 }
 
 void moverParaTras() {
-
-  ledcWrite(0, 256);  // 0% duty no motor1
-  ledcWrite(1, 256);  // 0% duty no motor1
-  ledcWrite(2, 256);  // 0% duty no motor1
-  ledcWrite(3, 256);  // 0% duty no motor1
-  ledcWrite(4, 0);  // 100% duty no motor1
-  ledcWrite(5, 0);  // 100% duty no motor1
-  ledcWrite(6, 0);  // 100% duty no motor1
-  ledcWrite(7, 0);  // 100% duty no motor1
+    piscarLED();
+  unsigned long tempoInicial = millis();
+  while (millis() - tempoInicial < 10) 
+  {
+      ledcWrite(0, 256);  // 0% duty no motor1
+      ledcWrite(1, 256);  // 0% duty no motor1
+      ledcWrite(2, 256);  // 0% duty no motor1
+      ledcWrite(3, 256);  // 0% duty no motor1
+      ledcWrite(4, 0);  // 100% duty no motor1
+      ledcWrite(5, 0);  // 100% duty no motor1
+      ledcWrite(6, 0);  // 100% duty no motor1
+      ledcWrite(7, 0);  // 100% duty no motor1
+  }
+      ledcWrite(0, 200);  // 0% duty no motor1
+      ledcWrite(1, 200);  // 0% duty no motor1
+      ledcWrite(2, 200);  // 0% duty no motor1
+      ledcWrite(3, 200);  // 0% duty no motor1
+      ledcWrite(4, 0);  // 100% duty no motor1
+      ledcWrite(5, 0);  // 100% duty no motor1
+      ledcWrite(6, 0);  // 100% duty no motor1
+      ledcWrite(7, 0);  // 100% duty no motor1
 
   Serial.println("Movendo para trás");
 }
 
 void virarEsquerda() {
-  parar();
-  unsigned long tempoInicial = millis();
-  while (millis() - tempoInicial < 10) {
-    ledcWrite(0, 256);  // 0% duty no motor1
-    ledcWrite(1, 0);  // 0% duty no motor1
-    ledcWrite(2, 256);  // 0% duty no motor1
-    ledcWrite(3, 0);  // 0% duty no motor1
-    ledcWrite(4, 256);  // 100% duty no motor1
-    ledcWrite(5, 0);  // 100% duty no motor1
-    ledcWrite(6, 256);  // 100% duty no motor1
-    ledcWrite(7, 0);  // 100% duty no motor1
+  // parar();
+  piscarLED();
+  Serial.println("Virando para a esquerda");
+
+  // unsigned long tempoInicial = millis();
+  // while (millis() - tempoInicial < 10000) {
+    // Motores da esquerda para frente
+    ledcWrite(0, 0);
+    ledcWrite(1, 0);
+    ledcWrite(4, 200);
+    ledcWrite(5, 200);
+    
+    // Motores da direita para trás
+    ledcWrite(2, 200);
+    ledcWrite(3, 200);
+    ledcWrite(6, 0);
+    ledcWrite(7, 0);
   }
-  parar();
-  
-  Serial.println("Virando à esquerda");
-}
+// }
 
 void virarDireita() {
-parar();
-  unsigned long tempoInicial = millis();
-  while (millis() - tempoInicial < 10) {
-    ledcWrite(0,0);  // 0% duty no motor1
-    ledcWrite(1,256);  // 0% duty no motor1
-    ledcWrite(2,0);  // 0% duty no motor1
-    ledcWrite(3,256);  // 0% duty no motor1
-    ledcWrite(4,0);  // 100% duty no motor1
-    ledcWrite(5,256);  // 100% duty no motor1
-    ledcWrite(6,0);  // 100% duty no motor1
-    ledcWrite(7,256);  // 100% duty no motor1
-  }
-  parar();
+  // parar();
+  piscarLED();
+  Serial.println("Virando para a direita");
+
+  // unsigned long tempoInicial = millis();
+  // while (millis() - tempoInicial < 10000) {
+  //   // Motores da direita para frente
+    ledcWrite(2, 0);
+    ledcWrite(3, 0);
+    ledcWrite(6, 200);
+    ledcWrite(7, 200);
+
+    // Motores da esquerda para trás
+    ledcWrite(0, 200);
+    ledcWrite(1, 200);
+    ledcWrite(4, 0);
+    ledcWrite(5, 0);
+  // }
+  // parar();
   
   Serial.println("Virando à direita");
 }
-void piscarLED() {
-  digitalWrite(ledPin, HIGH);
-  delay(100);
-  digitalWrite(ledPin, LOW);
-}
+
 // Função chamada ao acessar "/cmd"
 void handleCommand() {
   String dir = server.arg("dir");
