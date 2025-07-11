@@ -1,7 +1,19 @@
 #include <arduinoFFT.h>
 #include <math.h>
 
-// ------- MIC CONFIG ---------------------
+// LEDs
+#define LED_FRENTE 10
+#define LED_45_DIR_FRENTE 2
+#define LED_DIREITA 6         // Corrigido: pino duplicado antes
+#define LED_45_DIR_TRAS 3
+#define LED_ATRAS 5
+#define LED_45_ESQ_TRAS 4
+#define LED_ESQUERDA 9        // Corrigido: agora diferente de LED_DIREITA
+#define LED_45_ESQ_FRENTE 8
+
+#define LED_PAUSA 7
+#define LED_COLETA 13
+
 const int MIC1_PIN = A0;
 const int MIC2_PIN = A1;
 
@@ -17,29 +29,13 @@ float vet_valores_finais2[10];
 
 float maior_mic1 = 0.0;
 float maior_mic2 = 0.0;
-float menor_diferenca = 0;
-
-int angulos[] = {0, 45, 90, 135, 180};
+float max_val;
 int cont = 0;
 int angulo_theta = 0;
 int indice_mais_proximo = 0;
-int i, max_index = 0;
+int  max_index = 0;
 int maior_indice_do_vetor;
 
-float max_val;
-
-// LEDs
-#define LED_FRENTE 10
-#define LED_45_DIR_FRENTE 2
-#define LED_DIREITA 6         // Corrigido: pino duplicado antes
-#define LED_45_DIR_TRAS 3
-#define LED_ATRAS 5
-#define LED_45_ESQ_TRAS 4
-#define LED_ESQUERDA 9        // Corrigido: agora diferente de LED_DIREITA
-#define LED_45_ESQ_FRENTE 8
-
-#define LED_PAUSA 7
-#define LED_COLETA 13
 
 void apaga_leds() {
   digitalWrite(LED_ESQUERDA, LOW);
@@ -141,7 +137,7 @@ void equacao_final() {
 // TESTAR VALIDADE DESSA FUNCAO
 void acender_led_mais_proximo() {
   float angulos[] = {0, 45, 90, 135, 180};  // Lista de ângulos de referência
-  int indice_mais_proximo = 0;
+  // int indice_mais_proximo = 0;
 
   // Verifica limites inferiores e superiores
   if (angulo_theta <= (angulos[0] + angulos[1]) / 2) {
@@ -170,8 +166,9 @@ void acender_led() {
   apaga_leds();  // Garante que todos os LEDs sejam apagados primeiro
 
   // Acende o LED correspondente ao ângulo mais próximo
-  Serial.print("valor mais proximos ");
+  Serial.print("valor mais proximos \n");
   Serial.print(indice_mais_proximo);
+  
   switch (indice_mais_proximo) {
     case 0:
       digitalWrite(LED_FRENTE, HIGH);           // Ângulo 0°
@@ -258,9 +255,11 @@ void loop() {
     cont++;
 
     equacao_final();
-    // acender_led_mais_proximo();
+    acender_led_mais_proximo();
     acender_led();
   }
+  else
+  {
     for (int i = 0; i < 10; i++) {
       Serial.print("resultado da correlacao[");
       Serial.print(i);
@@ -268,5 +267,5 @@ void loop() {
       Serial.println(vet_valores_finais[i], 3); // tem o index do vetor
       Serial.println(vet_valores_finais2[i], 3);
     }
-
+  }
 }
