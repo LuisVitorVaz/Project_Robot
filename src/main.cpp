@@ -73,9 +73,10 @@ void coleta_amostras_grande(int bloco) {
 void coleta_amostras() {
   digitalWrite(LED_COLETA, HIGH);
   for (int i = 0; i < 100; i++) {
-    if (i < 20) mic1[i] = (float)analogRead(MIC1_PIN);
+    if (i < 60) mic1[i] = (float)analogRead(MIC1_PIN);
     mic2[i] = (float)analogRead(MIC2_PIN);
   }
+
   Serial.println("Fim da coleta de amostras.");
   digitalWrite(LED_COLETA, LOW);
 }
