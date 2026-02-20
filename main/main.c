@@ -1,4 +1,6 @@
 #include "motor.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 // #include <Arduino.h>
 // #include <WiFi.h>
 // #include <WebServer.h>
@@ -237,6 +239,18 @@
 void app_main(){
   
   setup_motors();
+  
+  brake();
+
+  vTaskDelay(pdTICKS_TO_MS(2000));
+
+  moveForward();
+
+  vTaskDelay(pdTICKS_TO_MS(5000));
+
+  moveBackward();
+
+  vTaskDelay(pdTICKS_TO_MS(2000));
 
   brake();
 }
