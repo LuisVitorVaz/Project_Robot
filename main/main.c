@@ -10,51 +10,6 @@ const char* password = "a1b23e75z123";
 
 WebServer server(80);
 
-// Each PWM channel corresponds to a motor input pin (LEDC channel)
-#define canalPWM1 0   // Motor1 Pin1 -> 12
-#define canalPWM2 1   // Motor1 Pin2 -> 13
-#define canalPWM3 2   // Motor2 Pin1 -> 14
-#define canalPWM4 3   // Motor2 Pin2 -> 27
-#define canalPWM5 4   // Motor3 Pin1 -> 32
-#define canalPWM6 5   // Motor3 Pin2 -> 33
-#define canalPWM7 6   // Motor4 Pin1 -> 25
-#define canalPWM8 7   // Motor4 Pin2 -> 26
-
-// Pin definitions
-// Motor 1 (Front Left)
-#define motor1Pin1 12
-#define motor1Pin2 13
-
-// Motor 2 (Front Right)
-#define motor2Pin1 14
-#define motor2Pin2 27
-
-// Motor 3 (Rear Left)
-#define motor3Pin1 32
-#define motor3Pin2 33
-
-// Motor 4 (Rear Right)
-#define motor4Pin1 25
-#define motor4Pin2 26
-
-// === Encoder pin definitions ===
-#define ENC1_A 34
-#define ENC1_B 15
-
-#define ENC2_A 22   // Changed from 2 → 35 to avoid boot pin conflict
-#define ENC2_B 4
-
-#define ENC3_A 36
-#define ENC3_B 18
-
-#define ENC4_A 39
-#define ENC4_B 21
-
-// Encoder constants
-#define PULSOS_POR_ROTACAO 333.33
-#define DIAMETRO_CM 6
-#define CIRCUNFERENCIA_CM (PI * DIAMETRO_CM)
-
 // Volatile variables for interrupt service routines (ISRs)
 volatile long encoder1Count = 0;
 volatile long encoder2Count = 0;
@@ -74,9 +29,6 @@ const int vetor[16] = {
   2, 1, -1, 0
 };
 
-// PWM settings
-#define frequenciaMotor 300
-#define resolucao 8 // 0 to 255
 
 // Global state variable
 String movimentoAtual = "parado";
@@ -88,175 +40,6 @@ void moverParaTras();
 void virarEsquerda();
 void virarDireita();
 
-// === HTML Page with control buttons ===
-const char htmlPage[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Controle do Carrinho</title>
-  <style>
-    body {
-      text-align: center;
-      font-family: Arial, sans-serif;
-      background-color: #2c3e50; /* dark bluish-gray */
-      margin: 0;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start;
-      min-height: 100vh;
-      color: #ecf0f1; /* light text */
-    }
-    h2 {
-      color: #ecf0f1;
-      margin-bottom: 20px;
-    }
-
-    /* Encoder status panel */
-    .encoder-panel {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 15px;
-      margin-bottom: 30px;
-      width: 100%;
-      max-width: 600px;
-    }
-    .encoder-box {
-      background-color: #34495e; /* softer dark card */
-      padding: 15px;
-      border-radius: 10px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-      text-align: center;
-    }
-    .encoder-box h3 {
-      margin: 0 0 8px 0;
-      font-size: 16px;
-      color: #bdc3c7;
-    }
-    .encoder-value {
-      font-size: 22px;
-      font-weight: bold;
-      color: #1abc9c; /* teal highlight */
-    }
-
-    /* Control panel */
-    .control-panel {
-      display: inline-block;
-      background-color: #34495e;
-      padding: 20px;
-      border-radius: 10px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-      margin: 0 auto;
-    }
-    .button-row {
-      display: flex;
-      justify-content: center;
-    }
-    .button {
-      width: 70px;
-      height: 70px;
-      margin: 8px;
-      border-radius: 10px;
-      border: none;
-      background-color: #2980b9;
-      color: white;
-      font-size: 24px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-    }
-    .button:active, .button.clicked {
-      background-color: #1f6391;
-      transform: scale(0.95);
-      box-shadow: inset 0 0 8px rgba(0,0,0,0.5);
-    }
-    .stop {
-      background-color: #e74c3c;
-    }
-    .stop:active, .stop.clicked {
-      background-color: #c0392b;
-    }
-  </style>
-</head>
-<body>
-  <h2>Controle do Carrinho</h2>
-
-  <div class="encoder-panel">
-    <div class="encoder-box">
-      <h3>Encoder 1</h3>
-      <div id="enc1" class="encoder-value">0</div>
-    </div>
-    <div class="encoder-box">
-      <h3>Encoder 2</h3>
-      <div id="enc2" class="encoder-value">0</div>
-    </div>
-    <div class="encoder-box">
-      <h3>Encoder 3</h3>
-      <div id="enc3" class="encoder-value">0</div>
-    </div>
-    <div class="encoder-box">
-      <h3>Encoder 4</h3>
-      <div id="enc4" class="encoder-value">0</div>
-    </div>
-  </div>
-
-  <div class="control-panel">
-    <div class="button-row">
-      <button onclick="sendCommand('forward')" class="button">&#9650;</button>
-    </div>
-    <div class="button-row">
-      <button onclick="sendCommand('left')" class="button">&#9664;</button>
-      <button onclick="sendCommand('stop')" class="button stop">&#9632;</button>
-      <button onclick="sendCommand('right')" class="button">&#9654;</button>
-    </div>
-    <div class="button-row">
-      <button onclick="sendCommand('backward')" class="button">&#9660;</button>
-    </div>
-  </div>
-
-  <script>
-    // Send command to ESP32 and highlight button
-    function sendCommand(cmd) {
-      let buttons = document.querySelectorAll('.button');
-      buttons.forEach(btn => btn.classList.remove('clicked'));
-      
-      if (cmd === 'forward') document.querySelector('.button-row:nth-child(1) .button').classList.add('clicked');
-      else if (cmd === 'left') document.querySelector('.button-row:nth-child(2) .button:nth-child(1)').classList.add('clicked');
-      else if (cmd === 'stop') document.querySelector('.button-row:nth-child(2) .button:nth-child(2)').classList.add('clicked');
-      else if (cmd === 'right') document.querySelector('.button-row:nth-child(2) .button:nth-child(3)').classList.add('clicked');
-      else if (cmd === 'backward') document.querySelector('.button-row:nth-child(3) .button').classList.add('clicked');
-
-      setTimeout(() => buttons.forEach(btn => btn.classList.remove('clicked')), 300);
-
-      fetch("/cmd?dir=" + cmd)
-        .then(response => console.log('Comando enviado: ' + cmd))
-        .catch(error => console.error('Erro ao enviar comando:', error));
-    }
-
-    // Update encoder values from ESP32 variables via /encoder
-    function updateEncoders() {
-      fetch("/encoder")
-        .then(res => res.json())
-        .then(data => {
-          document.getElementById("enc1").textContent = data.e1;
-          document.getElementById("enc2").textContent = data.e2;
-          document.getElementById("enc3").textContent = data.e3;
-          document.getElementById("enc4").textContent = data.e4;
-        })
-        .catch(err => console.error("Erro ao buscar encoders:", err));
-    }
-
-    // Update encoders every 200ms for real-time display
-    setInterval(updateEncoders, 200);
-  </script>
-</body>
-</html>
-)rawliteral";
 
 // === Interrupt service routines (ISRs) for each encoder ===
 void IRAM_ATTR encoder1ISR() {
@@ -425,12 +208,6 @@ void setup() {
 
   // Initially, all motors are off
   parar();
-
-  // Start Access Point
-  WiFi.softAP(ssid, password);
-  Serial.println("Access Point iniciado");
-  Serial.print("IP: ");
-  Serial.println(WiFi.softAPIP());
 
   // Set up web server routes
   server.on("/", []() {
