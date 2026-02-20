@@ -239,18 +239,18 @@
 void app_main(){
   
   setup_motors();
-  
+
   brake();
 
-  vTaskDelay(pdTICKS_TO_MS(2000));
+  vTaskDelay(pdMS_TO_TICKS(2000));
 
   moveForward();
 
-  vTaskDelay(pdTICKS_TO_MS(5000));
+  vTaskDelay(pdMS_TO_TICKS(5000));
 
   moveBackward();
 
-  vTaskDelay(pdTICKS_TO_MS(2000));
+  vTaskDelay(pdMS_TO_TICKS(5000));
 
   brake();
 }

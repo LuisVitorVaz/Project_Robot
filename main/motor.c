@@ -2,8 +2,13 @@
 
 static const char *TAG = "motor";
 
-const bdc_motor_mcpwm_config_t mcpwm_config = {
+const bdc_motor_mcpwm_config_t mcpwm_config_0 = {
         .group_id = 0,
+        .resolution_hz = resolucaoTimer,
+    };
+
+const bdc_motor_mcpwm_config_t mcpwm_config_1 = {
+        .group_id = 1,
         .resolution_hz = resolucaoTimer,
     };
 
@@ -37,10 +42,10 @@ bdc_motor_handle_t rear_left_motor;
 bdc_motor_handle_t rear_right_motor;
 
 void setup_motors(void){
-    ESP_ERROR_CHECK(bdc_motor_new_mcpwm_device(&front_left_motor_config, &mcpwm_config, &front_left_motor));
-    ESP_ERROR_CHECK(bdc_motor_new_mcpwm_device(&front_right_motor_config, &mcpwm_config, &front_right_motor));
-    ESP_ERROR_CHECK(bdc_motor_new_mcpwm_device(&rear_left_motor_config, &mcpwm_config, &rear_left_motor));
-    ESP_ERROR_CHECK(bdc_motor_new_mcpwm_device(&rear_right_motor_config, &mcpwm_config, &rear_right_motor));
+    ESP_ERROR_CHECK(bdc_motor_new_mcpwm_device(&front_left_motor_config, &mcpwm_config_0, &front_left_motor));
+    ESP_ERROR_CHECK(bdc_motor_new_mcpwm_device(&front_right_motor_config, &mcpwm_config_0, &front_right_motor));
+    ESP_ERROR_CHECK(bdc_motor_new_mcpwm_device(&rear_left_motor_config, &mcpwm_config_1, &rear_left_motor));
+    ESP_ERROR_CHECK(bdc_motor_new_mcpwm_device(&rear_right_motor_config, &mcpwm_config_1, &rear_right_motor));
     ESP_LOGI(TAG, "Configuração dos motores finalizada.");
 
     ESP_ERROR_CHECK(bdc_motor_enable(front_left_motor));
