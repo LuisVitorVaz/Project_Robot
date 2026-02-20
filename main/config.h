@@ -1,3 +1,6 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
 // Each PWM channel corresponds to a motor input pin (LEDC channel)
 #define canalPWM1 0   // Motor1 Pin1 -> 12
 #define canalPWM2 1   // Motor1 Pin2 -> 13
@@ -7,23 +10,6 @@
 #define canalPWM6 5   // Motor3 Pin2 -> 33
 #define canalPWM7 6   // Motor4 Pin1 -> 25
 #define canalPWM8 7   // Motor4 Pin2 -> 26
-
-// Pin definitions
-// Motor 1 (Front Left)
-#define motor1Pin1 12
-#define motor1Pin2 13
-
-// Motor 2 (Front Right)
-#define motor2Pin1 14
-#define motor2Pin2 27
-
-// Motor 3 (Rear Left)
-#define motor3Pin1 32
-#define motor3Pin2 33
-
-// Motor 4 (Rear Right)
-#define motor4Pin1 25
-#define motor4Pin2 26
 
 // === Encoder pin definitions ===
 #define ENC1_A 34
@@ -43,6 +29,4 @@
 #define DIAMETRO_CM 6
 #define CIRCUNFERENCIA_CM (PI * DIAMETRO_CM)
 
-// PWM settings
-#define frequenciaMotor 300
-#define resolucao 8 // 0 to 255
+#endif // CONFIG_H
