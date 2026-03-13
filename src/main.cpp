@@ -48,6 +48,33 @@ void apaga_leds() {
   digitalWrite(LED_45_DIR_TRAS, LOW);
   digitalWrite(LED_PAUSA, LOW);
 }
+// funcao teste do TDOA
+void ajustar_tdoa_por_janela(float *correlacao, int *max_idx_filtrado) {
+  const int centro = 40;  // atraso zero
+  const int janela = 20;  // aceita apenas atrasos entre -20 e +20
+
+  float max_val_filtro = correlacao[centro];
+  int melhor_idx = centro;
+
+  for (int i = centro - janela; i <= centro + janela; i++) {
+    if (i >= 0 && i < 81) {
+      if (correlacao[i] > max_val_filtro) {
+        max_val_filtro = correlacao[i];
+        melhor_idx = i;
+      }
+    }
+  }
+
+  *max_idx_filtrado = melhor_idx;
+
+  Serial.print("Índice TDOA ajustado (janela +-");
+  Serial.print(janela);
+  Serial.print("): ");
+  Serial.println(*max_idx_filtrado);
+}
+
+
+
 
 void imprimir_vetor() {
   for (int i = 0; i < 1000; i++) {
@@ -239,6 +266,8 @@ void loop() {
 
     correlacao_cruzada(vetor1_norm, vetor2_norm, correlacao_resultado);
 
+// FUNCAO TESTE
+    ajustar_tdoa_por_janela(correlacao_resultado, &max_index);
     detectar_angulo(correlacao_resultado);
     vet_valores_finais[cont] = max_index;
     vet_valores_finais2[cont] = max_val;
