@@ -100,7 +100,7 @@ void coleta_amostras_grande(int bloco) {
 void coleta_amostras() {
   digitalWrite(LED_COLETA, HIGH);
   for (int i = 0; i < 100; i++) {
-    if (i < 60) mic1[i] = (float)analogRead(MIC1_PIN);
+    mic1[i] = (float)analogRead(MIC1_PIN);
     mic2[i] = (float)analogRead(MIC2_PIN);
   }
 
@@ -233,8 +233,8 @@ void detectar_angulo(float correlacao[81]) {
 }
 
 void setup() {
-  Serial.begin(9600);
-
+  // Serial.begin(9600);
+  Serial.begin(115200);
   pinMode(LED_ESQUERDA, OUTPUT);
   pinMode(LED_DIREITA, OUTPUT);
   pinMode(LED_FRENTE, OUTPUT);
