@@ -97,14 +97,31 @@ void coleta_amostras_grande(int bloco) {
   delay(100);
 }
 
+// void coleta_amostras() {
+//   digitalWrite(LED_COLETA, HIGH);
+//   for (int i = 0; i < 100; i++) {
+//     mic1[i] = (float)analogRead(MIC1_PIN);
+//     mic2[i] = (float)analogRead(MIC2_PIN);
+//   }
+
+//   Serial.println("Fim da coleta de amostras.");
+//   digitalWrite(LED_COLETA, LOW);
+// }
+const int sampleRate = 16000;
+unsigned long lastMicros = 0;
+
 void coleta_amostras() {
   digitalWrite(LED_COLETA, HIGH);
+
   for (int i = 0; i < 100; i++) {
-    mic1[i] = (float)analogRead(MIC1_PIN);
-    mic2[i] = (float)analogRead(MIC2_PIN);
+
+    while (micros() - lastMicros < (1000000 / sampleRate));
+    lastMicros = micros();
+
+    mic1[i] = analogRead(MIC1_PIN);
+    mic2[i] = analogRead(MIC2_PIN);
   }
 
-  Serial.println("Fim da coleta de amostras.");
   digitalWrite(LED_COLETA, LOW);
 }
 

@@ -146,3 +146,5 @@ try:
 except KeyboardInterrupt:
     ser.close()
     print("Interrompido pelo usuário.")
+
+    
