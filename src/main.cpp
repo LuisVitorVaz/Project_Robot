@@ -4,11 +4,11 @@
 // LEDs
 #define LED_FRENTE 10
 #define LED_45_DIR_FRENTE 2
-#define LED_DIREITA 6         // Corrigido: pino duplicado antes
+#define LED_DIREITA 6
 #define LED_45_DIR_TRAS 3
 #define LED_ATRAS 5
 #define LED_45_ESQ_TRAS 4
-#define LED_ESQUERDA 9        // Corrigido: agora diferente de LED_DIREITA
+#define LED_ESQUERDA 9
 #define LED_45_ESQ_FRENTE 8
 
 #define LED_PAUSA 7
@@ -17,47 +17,57 @@
 const int MIC1_PIN = A0;
 const int MIC2_PIN = A1;
 
-float mic1[20];
-float mic2[100];
+// ===== NOVOS TAMANHOS =====
+uint8_t mic1[100];
+uint8_t mic2[300];
 
-float vetor1_norm[20];
-float vetor2_norm[100];
-float correlacao_resultado[81];
-float vetor_final[1000];
-float vet_valores_finais[10];
-float vet_valores_finais2[10];
+uint8_t vetor1_norm[100];
+uint8_t vetor2_norm[300];
 
-float maior_mic1 = 0.0;
-float maior_mic2 = 0.0;
-float max_val;
+uint16_t correlacao_resultado[350];
+uint8_t vetor_final[300];
+
+uint16_t vet_valores_finais[10];
+uint16_t vet_valores_finais2[10];
+
+uint8_t maior_mic1 = 0;
+uint8_t maior_mic2 = 0;
+
+uint16_t max_val;
 int cont = 0;
 int angulo_theta = 0;
 int indice_mais_proximo = 0;
-int  max_index = 0;
+int max_index = 0;
 int maior_indice_do_vetor;
 
+const int sampleRate = 9000;
+unsigned long lastMicros = 0;
 
-void apaga_leds() {
-  digitalWrite(LED_ESQUERDA, LOW);
-  digitalWrite(LED_DIREITA, LOW);
-  digitalWrite(LED_FRENTE, LOW);
-  digitalWrite(LED_ATRAS, LOW);
-  digitalWrite(LED_45_ESQ_FRENTE, LOW);
-  digitalWrite(LED_45_DIR_FRENTE, LOW);
-  digitalWrite(LED_45_ESQ_TRAS, LOW);
-  digitalWrite(LED_45_DIR_TRAS, LOW);
-  digitalWrite(LED_PAUSA, LOW);
-}
-// funcao teste do TDOA
-void ajustar_tdoa_por_janela(float *correlacao, int *max_idx_filtrado) {
-  const int centro = 40;  // atraso zero
-  const int janela = 20;  // aceita apenas atrasos entre -20 e +20
+// ==========================
 
-  float max_val_filtro = correlacao[centro];
+// void apaga_leds() {
+//   digitalWrite(LED_ESQUERDA, LOW);
+//   digitalWrite(LED_DIREITA, LOW);
+//   digitalWrite(LED_FRENTE, LOW);
+//   digitalWrite(LED_ATRAS, LOW);
+//   digitalWrite(LED_45_ESQ_FRENTE, LOW);
+//   digitalWrite(LED_45_DIR_FRENTE, LOW);
+//   digitalWrite(LED_45_ESQ_TRAS, LOW);
+//   digitalWrite(LED_45_DIR_TRAS, LOW);
+//   digitalWrite(LED_PAUSA, LOW);
+// }
+
+// ==========================
+
+void ajustar_tdoa_por_janela(uint16_t *correlacao, int *max_idx_filtrado) {
+  const int centro = 100;
+  const int janela = 20;
+
+  uint16_t max_val_filtro = correlacao[centro];
   int melhor_idx = centro;
 
   for (int i = centro - janela; i <= centro + janela; i++) {
-    if (i >= 0 && i < 81) {
+    if (i >= 0 && i < 201) {
       if (correlacao[i] > max_val_filtro) {
         max_val_filtro = correlacao[i];
         melhor_idx = i;
@@ -66,192 +76,159 @@ void ajustar_tdoa_por_janela(float *correlacao, int *max_idx_filtrado) {
   }
 
   *max_idx_filtrado = melhor_idx;
-
-  Serial.print("Índice TDOA ajustado (janela +-");
-  Serial.print(janela);
-  Serial.print("): ");
-  Serial.println(*max_idx_filtrado);
 }
 
-
-
-
-void imprimir_vetor() {
-  for (int i = 0; i < 1000; i++) {
-    Serial.print("valores vetor final[");
-    Serial.print(i);
-    Serial.print("] = ");
-    Serial.println(vetor_final[i], 3);
-  }
-}
-
-void coleta_amostras_grande(int bloco) {
-  for (int i = 0; i < 100; i++) {
-    vetor_final[bloco * 100 + i] = mic2[i];
-  }
-
-  digitalWrite(LED_PAUSA, HIGH);
-  Serial.println("Aguardando 5 segundos...");
-  delay(5000);
-  digitalWrite(LED_PAUSA, LOW);
-  delay(100);
-}
-
-// void coleta_amostras() {
-//   digitalWrite(LED_COLETA, HIGH);
-//   for (int i = 0; i < 100; i++) {
-//     mic1[i] = (float)analogRead(MIC1_PIN);
-//     mic2[i] = (float)analogRead(MIC2_PIN);
-//   }
-
-//   Serial.println("Fim da coleta de amostras.");
-//   digitalWrite(LED_COLETA, LOW);
-// }
-const int sampleRate = 16000;
-unsigned long lastMicros = 0;
+// ==========================
 
 void coleta_amostras() {
-  digitalWrite(LED_COLETA, HIGH);
+  // digitalWrite(LED_COLETA, HIGH);
 
-  for (int i = 0; i < 100; i++) {
+  for (int i = 0; i < 300; i++) {
 
-    while (micros() - lastMicros < (1000000 / sampleRate));
-    lastMicros = micros();
+    // while (micros() - lastMicros < (1000000 / sampleRate));
+    // lastMicros = micros();
 
-    mic1[i] = analogRead(MIC1_PIN);
-    mic2[i] = analogRead(MIC2_PIN);
-  }
-
-  digitalWrite(LED_COLETA, LOW);
-}
-
-void imprimir_amostras() {
-  Serial.println("Amostras coletadas:");
-  for (int i = 0; i < 100; i++) {
-    if (i < 20) {
-      Serial.print("mic1["); Serial.print(i); Serial.print("] = ");
-      Serial.print(mic1[i]); Serial.print(" | ");
+    if (i < 100) {
+      mic1[i] = analogRead(MIC1_PIN) >> 2;
     }
-    Serial.print("mic2["); Serial.print(i); Serial.print("] = ");
-    Serial.println(mic2[i]);
+
+    mic2[i] = analogRead(MIC2_PIN) >> 2;
   }
+
+  // digitalWrite(LED_COLETA, LOW);
+
+  // ===== INÍCIO DO BLOCO =====
+}
+void print_amostras(){
+    Serial.println("START");
+
+    // ===== PRINT mic1 =====
+    Serial.println("Amostras mic1:");
+    for (int i = 0; i < 100; i++) {
+      Serial.print("mic1[");
+      Serial.print(i);
+      Serial.print("] = ");
+      Serial.println(mic1[i]);
+    }
+
+    // ===== PRINT mic2 =====
+    Serial.println("Amostras mic2:");
+    for (int i = 0; i < 300; i++) {
+      Serial.print("mic2[");
+      Serial.print(i);
+      Serial.print("] = ");
+      Serial.println(mic2[i]);
+    }
 }
 
-void encontrar_maior(const float *vetor, int tamanho, float *maior_destino) {
+// void coleta_amostras_grande(int bloco) {
+//   for (int i = 0; i < 300; i++) {
+//     vetor_final[i] = mic2[i];
+//   }
+
+//   digitalWrite(LED_PAUSA, HIGH);
+//   delay(5000);
+//   digitalWrite(LED_PAUSA, LOW);
+// }
+
+// ==========================
+
+void encontrar_maior(const uint8_t *vetor, int tamanho, uint8_t *maior_destino) {
   *maior_destino = vetor[0];
-  maior_indice_do_vetor = 0;
+
   for (int i = 1; i < tamanho; i++) {
     if (vetor[i] > *maior_destino) {
       *maior_destino = vetor[i];
-      maior_indice_do_vetor = i;
     }
   }
 }
 
-void normalizar_vetor(const float *vetor, float *vetor_norm, int tamanho, float normalizar) {
+void normalizar_vetor(const uint8_t *vetor, uint8_t *saida, int tamanho, uint8_t max_val) {
   for (int i = 0; i < tamanho; i++) {
-    vetor_norm[i] = normalizar != 0 ? vetor[i] / normalizar : 0;
+    saida[i] = max_val != 0 ? (vetor[i] * 255) / max_val : 0;
   }
 }
 
-void imprimir_vetor_normalizado(const float *vetor, int tamanho, const char* nome) {
-  Serial.print("Vetor "); Serial.print(nome); Serial.println(" normalizado:");
-  for (int i = 0; i < tamanho; i++) {
-    Serial.print(vetor[i], 3);
-    Serial.print(" ");
-    if ((i + 1) % 10 == 0) Serial.println();
-  }
-  Serial.println();
-}
+void correlacao_cruzada(const uint8_t *mic1, const uint8_t *mic2, uint16_t *resultado) {
+  for (int k = 0; k < 201; k++) {
+    uint32_t soma = 0;
 
-void correlacao_cruzada(const float *mic1, const float *mic2, float *resultado) {
-  for (int k = 0; k <= 80; k++) {
-    float soma = 0.0;
-    for (int n = 0; n < 20; n++) {
+    for (int n = 0; n < 100; n++) {
       soma += mic1[n] * mic2[n + k];
     }
-    resultado[k] = soma/20;
+
+    resultado[k] = soma / 100;
   }
-}
 
-void equacao_final() {
-  angulo_theta = (-0.174 * pow(max_index, 2.0)) + (10.6 * max_index) + 0.122;
-  Serial.print("valor da funcao é: ");
-  Serial.println(angulo_theta);
-}
-// TESTAR VALIDADE DESSA FUNCAO
-void acender_led_mais_proximo() {
-  float angulos[] = {0, 45, 90, 135, 180};  // Lista de ângulos de referência
-  // int indice_mais_proximo = 0;
+    Serial.println("Resultado da correlacao cruzada:");
 
-  // Verifica limites inferiores e superiores
-  if (angulo_theta <= (angulos[0] + angulos[1]) / 2) {
-    indice_mais_proximo = 0;
-  } else if (angulo_theta >= (angulos[4] + angulos[3]) / 2) {
-    indice_mais_proximo = 4;
-  } else {
-    // Verifica qual intervalo o angulo_theta está mais próximo
-    for (int i = 0; i < 4; i++) {
-      float limite_inferior = (angulos[i] + angulos[i + 1]) / 2;
-      float limite_superior = (angulos[i + 1] + angulos[i + 2]) / 2;
-
-      if (angulo_theta >= limite_inferior && angulo_theta < limite_superior) {
-        indice_mais_proximo = i + 1;
-        break;
-      }
+    for (int i = 0; i < 201; i++) {
+      Serial.print("correlacao[");
+      Serial.print(i);
+      Serial.print("] = ");
+      Serial.println(correlacao_resultado[i]);
     }
-  }
 
-  // Aqui você já tem o índice do ângulo mais próximo:
-  // Use `indice_mais_proximo` para acender o LED correspondente
+    Serial.println("END");
 }
 
-// VERIFICAR ESTA FUNCAO TESTAR CODIGO
-void acender_led() {
-  apaga_leds();  // Garante que todos os LEDs sejam apagados primeiro
+// ==========================
 
-  // Acende o LED correspondente ao ângulo mais próximo
-  Serial.print("valor mais proximos \n");
-  Serial.print(indice_mais_proximo);
-  
-  switch (indice_mais_proximo) {
-    case 0:
-      digitalWrite(LED_FRENTE, HIGH);           // Ângulo 0°
-      break;
-    case 1:
-      digitalWrite(LED_45_DIR_FRENTE, HIGH);    // Ângulo 45°
-      break;
-    case 2:
-      digitalWrite(LED_DIREITA, HIGH);          // Ângulo 90°
-      break;
-    case 3:
-      digitalWrite(LED_45_DIR_TRAS, HIGH);      // Ângulo 135°
-      break;
-    case 4:
-      digitalWrite(LED_ATRAS, HIGH);            // Ângulo 180°
-      break;
-  }
-}
-
-void detectar_angulo(float correlacao[81]) {
+void detectar_angulo(uint16_t *correlacao) {
   max_val = correlacao[0];
   max_index = 0;
 
-  for (int i = 1; i < 81; i++) {
+  for (int i = 1; i < 201; i++) {
     if (correlacao[i] > max_val) {
       max_val = correlacao[i];
       max_index = i;
     }
   }
-
-  Serial.println("Valor máximo da correlação:");
-  Serial.print("Índice: "); Serial.print(max_index);
-  Serial.print(" Valor: "); Serial.println(max_val);
 }
 
+void equacao_final() {
+  angulo_theta = (-0.174 * pow(max_index, 2.0)) + (10.6 * max_index) + 0.122;
+}
+
+// ==========================
+
+void acender_led_mais_proximo() {
+  float angulos[] = {0, 45, 90, 135, 180};
+
+  if (angulo_theta <= (angulos[0] + angulos[1]) / 2) {
+    indice_mais_proximo = 0;
+  } else if (angulo_theta >= (angulos[4] + angulos[3]) / 2) {
+    indice_mais_proximo = 4;
+  } else {
+    for (int i = 0; i < 4; i++) {
+      float li = (angulos[i] + angulos[i + 1]) / 2;
+      float ls = (angulos[i + 1] + angulos[i + 2]) / 2;
+
+      if (angulo_theta >= li && angulo_theta < ls) {
+        indice_mais_proximo = i + 1;
+        break;
+      }
+    }
+  }
+}
+
+void acender_led() {
+  // apaga_leds();
+
+  // switch (indice_mais_proximo) {
+  //   case 0: digitalWrite(LED_FRENTE, HIGH); break;
+  //   case 1: digitalWrite(LED_45_DIR_FRENTE, HIGH); break;
+  //   case 2: digitalWrite(LED_DIREITA, HIGH); break;
+  //   case 3: digitalWrite(LED_45_DIR_TRAS, HIGH); break;
+  //   case 4: digitalWrite(LED_ATRAS, HIGH); break;
+  // }
+}
+
+// ==========================
+
 void setup() {
-  // Serial.begin(9600);
   Serial.begin(115200);
+
   pinMode(LED_ESQUERDA, OUTPUT);
   pinMode(LED_DIREITA, OUTPUT);
   pinMode(LED_FRENTE, OUTPUT);
@@ -264,55 +241,51 @@ void setup() {
   pinMode(LED_COLETA, OUTPUT);
 }
 
+// ==========================
+
 void loop() {
+
   if (cont < 10) {
-    // Resetar vetores
-    for (int i = 0; i < 81; i++) correlacao_resultado[i] = 0.0;
+
+    for (int i = 0; i < 350; i++) correlacao_resultado[i] = 0;
 
     coleta_amostras();
-    imprimir_amostras();
+    print_amostras();
 
-    encontrar_maior(mic1, 20, &maior_mic1);
-    encontrar_maior(mic2, 100, &maior_mic2);
+    encontrar_maior(mic1, 100, &maior_mic1);
+    encontrar_maior(mic2, 300, &maior_mic2);
 
-    normalizar_vetor(mic1, vetor1_norm, 20, maior_mic1);
-    normalizar_vetor(mic2, vetor2_norm, 100, maior_mic2);
+    normalizar_vetor(mic1, vetor1_norm, 100, maior_mic1);
+    normalizar_vetor(mic2, vetor2_norm, 300, maior_mic2);
 
-    imprimir_vetor_normalizado(vetor1_norm, 20, "mic1");
-    imprimir_vetor_normalizado(vetor2_norm, 100, "mic2");
+    Serial.println("NORMALIZADO mic1:");
+      for (int i = 0; i < 100; i++) {
+        Serial.println(vetor1_norm[i]);
+      }
 
     correlacao_cruzada(vetor1_norm, vetor2_norm, correlacao_resultado);
 
-// FUNCAO TESTE
     ajustar_tdoa_por_janela(correlacao_resultado, &max_index);
     detectar_angulo(correlacao_resultado);
+
     vet_valores_finais[cont] = max_index;
     vet_valores_finais2[cont] = max_val;
 
-
-    Serial.println("Resultado da correlação cruzada:");
-    for (int i = 0; i < 81; i++) {
-      Serial.print("correlacao[");
-      Serial.print(i);
-      Serial.print("] = ");
-      Serial.println(correlacao_resultado[i], 3);
-    }
-
-    coleta_amostras_grande(cont);
     cont++;
 
     equacao_final();
     acender_led_mais_proximo();
     acender_led();
   }
-  else
-  {
+  else {
     for (int i = 0; i < 10; i++) {
-      Serial.print("resultado da correlacao[");
+      Serial.print("resultado[");
       Serial.print(i);
       Serial.print("] = ");
-      Serial.println(vet_valores_finais[i], 3); // tem o index do vetor
-      Serial.println(vet_valores_finais2[i], 3);
+      Serial.print(vet_valores_finais[i]);
+      Serial.print(" | ");
+      Serial.println(vet_valores_finais2[i]);
+      Serial.println(max_index);
     }
   }
 }
