@@ -1,192 +1,223 @@
-import serial
-import matplotlib.pyplot as plt
+"""
+receiver_realtime.py
+────────────────────
+Servidor TCP que fica ouvindo na porta 5005.
+A ESP32 conecta, envia START...END, desconecta e repete.
+Os gráficos atualizam automaticamente a cada captura.
+
+Execute ANTES de ligar a ESP32:
+    python receiver_realtime.py
+"""
+
+import socket
 import re
-import time
+import threading
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from collections import deque
 
 # ==========================
-# CONFIG SERIAL
+# CONFIG
 # ==========================
-porta = 'COM5'
-baudrate = 115200
-
-ser = serial.Serial(porta, baudrate, timeout=1)
-time.sleep(2)
-ser.reset_input_buffer()
+HOST = "10.69.69.71"   # escuta em todas as interfaces
+PORT = 5005
 
 # ==========================
-# ARQUIVO DE LOG
+# ESTADO COMPARTILHADO
 # ==========================
-arquivo = open("dados_serial.txt", "w", encoding="utf-8")
-
-sinal1 = []
-sinal2 = []
-correlacao = []
-
-print("Capturando dados...")
-
-inicio = time.time()
-timeout = 10
-
-# ==========================
-# CAPTURA
-# ==========================
-while True:
-
-    if time.time() - inicio > timeout:
-        print("⚠️ Timeout geral")
-        arquivo.write("⚠️ Timeout geral\n")
-        break
-
-    try:
-        linha = ser.readline().decode(errors='ignore').strip()
-    except:
-        continue
-
-    if not linha:
-        continue
-
-    print(linha)
-    arquivo.write(linha + "\n")
-
-    if linha == "END":
-        print("Fim da transmissão")
-        break
-
-    if linha.startswith("mic1["):
-        m = re.search(r"= (-?\d+)", linha)
-        if m:
-            sinal1.append(int(m.group(1)))
-
-    elif linha.startswith("mic2["):
-        m = re.search(r"= (-?\d+)", linha)
-        if m:
-            sinal2.append(int(m.group(1)))
-
-    elif linha.startswith("correlacao["):
-        m = re.search(r"= (-?\d+)", linha)
-        if m:
-            correlacao.append(int(m.group(1)))
-
-ser.close()
-
-# ==========================
-# RESUMO
-# ==========================
-print("\nResumo da captura:")
-print(f"mic1: {len(sinal1)}")
-print(f"mic2: {len(sinal2)}")
-print(f"correlacao: {len(correlacao)}")
-
-arquivo.write("\n===== RESUMO =====\n")
-arquivo.write(f"mic1: {len(sinal1)}\n")
-arquivo.write(f"mic2: {len(sinal2)}\n")
-arquivo.write(f"correlacao: {len(correlacao)}\n")
-
-# ==========================
-# SALVAR ORGANIZADO
-# ==========================
-arquivo.write("\n--- mic1 ---\n")
-for i, v in enumerate(sinal1):
-    arquivo.write(f"{i}: {v}\n")
-
-arquivo.write("\n--- mic2 ---\n")
-for i, v in enumerate(sinal2):
-    arquivo.write(f"{i}: {v}\n")
-
-arquivo.write("\n--- correlacao ---\n")
-for i, v in enumerate(correlacao):
-    arquivo.write(f"{i}: {v}\n")
-
-arquivo.close()
-
-print("✅ Dados salvos em dados_serial.txt")
-
-# ==========================
-# VALIDAÇÃO
-# ==========================
-if len(sinal1) == 0 or len(sinal2) == 0:
-    print("❌ Erro: sinais não capturados")
-    exit()
-
-# ==========================
-# FUNÇÃO: INTERPOLAR ZEROS
-# ==========================
-def interpolar_zeros(dados):
-    dados = np.array(dados, dtype=float)
-
-    for i in range(1, len(dados) - 1):
-        if dados[i] == 0:
-            esquerda = dados[i - 1]
-            direita = dados[i + 1]
-
-            if esquerda != 0 and direita != 0:
-                dados[i] = (esquerda + direita) / 2
-
-    return dados
-
-# ==========================
-# SUAVIZAÇÃO
-# ==========================
-def media_movel(dados, janela=5):
-    if len(dados) < janela:
-        return dados
-    return np.convolve(dados, np.ones(janela)/janela, mode='same')
-
-# ==========================
-# NORMALIZAÇÃO
-# ==========================
-def normalizar(dados):
-    dados = np.array(dados)
-    if np.max(np.abs(dados)) == 0:
-        return dados
-    return dados / np.max(np.abs(dados))
+dados = {
+    "mic1":       [],
+    "mic2":       [],
+    "correlacao": [],
+    "max_index":  None,
+    "max_val":    None,
+    "angulo":     None,
+    "novo":       False,
+}
+historico_angulo = deque(maxlen=100)
+lock = threading.Lock()
 
 # ==========================
 # PROCESSAMENTO
 # ==========================
-sinal1_n = interpolar_zeros(normalizar(sinal1))
-sinal2_n = interpolar_zeros(normalizar(sinal2))
-
-correlacao_interp = interpolar_zeros(correlacao)
-correlacao_suavizada = media_movel(correlacao_interp)
+def reconstruir(arr):
+    arr = np.array(arr, dtype=float)
+    arr[arr == 0] = np.nan
+    for i in range(1, len(arr) - 1):
+        prev = arr[i-1] if not np.isnan(arr[i-1]) else arr[i]
+        if not np.isnan(arr[i]) and abs(arr[i] - prev) > 150:
+            arr[i] = np.nan
+    x = np.arange(len(arr))
+    mask = ~np.isnan(arr)
+    if mask.sum() >= 2:
+        arr = np.interp(x, x[mask], arr[mask])
+    arr = np.convolve(arr, np.ones(7)/7, mode="same")
+    m = np.max(np.abs(arr))
+    return arr / m if m != 0 else arr
 
 # ==========================
-# PLOTS
+# THREAD — servidor TCP
 # ==========================
-plt.figure(figsize=(12, 8))
+def servidor_tcp():
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind((HOST, PORT))
+    srv.listen(1)
+    print(f"[receiver] Servidor TCP ouvindo em {HOST}:{PORT}")
+    print(f"[receiver] Aguardando conexao da ESP32...\n")
 
-plt.subplot(3, 1, 1)
-plt.plot(sinal1_n)
-plt.title("Sinal mic1")
-plt.grid()
+    while True:
+        try:
+            conn, addr = srv.accept()
+        except Exception as e:
+            print(f"[receiver] Erro: {e}")
+            break
 
-plt.subplot(3, 1, 2)
-plt.plot(sinal2_n)
-plt.title("Sinal mic2")
-plt.grid()
+        print(f"[receiver] ESP32 conectada: {addr}")
 
-plt.subplot(3, 1, 3)
-min_len = min(len(sinal1_n), len(sinal2_n))
-plt.plot(sinal1_n[:min_len], label="mic1")
-plt.plot(sinal2_n[:min_len], linestyle='--', label="mic2")
-plt.title("Sobreposição")
-plt.legend()
-plt.grid()
+        buf = ""
+        mic1_tmp, mic2_tmp, corr_tmp = [], [], []
+        midx, mval, ang = None, None, None
+
+        while True:
+            try:
+                chunk = conn.recv(4096).decode(errors="ignore")
+            except Exception:
+                break
+            if not chunk:
+                break
+
+            buf += chunk
+
+            while "\n" in buf:
+                linha, buf = buf.split("\n", 1)
+                linha = linha.strip()
+                if not linha:
+                    continue
+
+                if linha == "END":
+                    with lock:
+                        dados["mic1"]       = mic1_tmp[:]
+                        dados["mic2"]       = mic2_tmp[:]
+                        dados["correlacao"] = corr_tmp[:]
+                        dados["max_index"]  = midx
+                        dados["max_val"]    = mval
+                        dados["angulo"]     = ang
+                        dados["novo"]       = True
+                        if ang is not None:
+                            historico_angulo.append(ang)
+                    print(f"[receiver] angulo={ang}  max_index={midx}  "
+                          f"mic1={len(mic1_tmp)}pts  mic2={len(mic2_tmp)}pts")
+                    buf = ""
+                    break
+
+                m = re.search(r"= (-?\d+)", linha)
+                if not m:
+                    continue
+                val = int(m.group(1))
+
+                if   linha.startswith("mic1["):        mic1_tmp.append(val)
+                elif linha.startswith("mic2["):        mic2_tmp.append(val)
+                elif linha.startswith("correlacao["):  corr_tmp.append(val)
+                elif linha.startswith("max_index"):    midx = val
+                elif linha.startswith("max_val"):      mval = val
+                elif linha.startswith("angulo_theta"): ang  = val
+
+        conn.close()
+
+thread = threading.Thread(target=servidor_tcp, daemon=True)
+thread.start()
+
+# ==========================
+# PLOT EM TEMPO REAL
+# ==========================
+fig, axes = plt.subplots(2, 2, figsize=(14, 8))
+fig.suptitle("ESP32 — Osciloscópio em Tempo Real", fontsize=13, fontweight="bold")
+
+ax_mic1 = axes[0, 0]
+ax_mic2 = axes[0, 1]
+ax_corr = axes[1, 0]
+ax_ang  = axes[1, 1]
+
+line_mic1, = ax_mic1.plot([], [], color="steelblue",      lw=1.5)
+line_mic2, = ax_mic2.plot([], [], color="darkorange",     lw=1.5)
+line_corr, = ax_corr.plot([], [], color="mediumseagreen", lw=1.5)
+vline      = ax_corr.axvline(x=0, color="red", linestyle="--", lw=1.2, label="max_index")
+line_ang,  = ax_ang.plot([], [], color="mediumpurple", lw=1.5, marker="o", markersize=3)
+
+for ax, titulo, xlabel in [
+    (ax_mic1, "mic1",                "Amostra"),
+    (ax_mic2, "mic2",                "Amostra"),
+    (ax_corr, "Correlacao cruzada",  "Lag"),
+    (ax_ang,  "Historico do angulo", "Captura"),
+]:
+    ax.set_title(titulo)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Amplitude")
+    ax.grid(True)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(-1.2, 1.2)
+
+ax_ang.set_ylabel("Angulo (graus)")
+ax_ang.set_ylim(-10, 190)
+ax_corr.legend(loc="upper right")
+
+txt_angulo = ax_ang.text(
+    0.05, 0.90, "Aguardando ESP32...",
+    transform=ax_ang.transAxes,
+    fontsize=14, fontweight="bold", color="mediumpurple"
+)
+
+def update(_):
+    with lock:
+        if not dados["novo"]:
+            return
+        dados["novo"] = False
+        mic1  = dados["mic1"][:]
+        mic2  = dados["mic2"][:]
+        corr  = dados["correlacao"][:]
+        midx  = dados["max_index"]
+        ang   = dados["angulo"]
+        hist  = list(historico_angulo)
+
+    if len(mic1) >= 5:
+        s1 = reconstruir(mic1)
+        line_mic1.set_data(np.arange(len(s1)), s1)
+        ax_mic1.set_xlim(0, len(s1) - 1)
+        ax_mic1.set_ylim(-1.2, 1.2)
+
+    if len(mic2) >= 5:
+        s2 = reconstruir(mic2)
+        line_mic2.set_data(np.arange(len(s2)), s2)
+        ax_mic2.set_xlim(0, len(s2) - 1)
+        ax_mic2.set_ylim(-1.2, 1.2)
+
+    if len(corr) >= 5:
+        c = reconstruir(corr)
+        line_corr.set_data(np.arange(len(c)), c)
+        ax_corr.set_xlim(0, len(c) - 1)
+        ax_corr.set_ylim(-1.2, 1.2)
+        if midx is not None:
+            vline.set_xdata([midx, midx])
+
+    if hist:
+        x = list(range(len(hist)))
+        line_ang.set_data(x, hist)
+        ax_ang.set_xlim(0, max(len(hist) - 1, 1))
+        ax_ang.set_ylim(max(0, min(hist) - 15), min(180, max(hist) + 15))
+
+    if ang is not None:
+        txt_angulo.set_text(f"Angulo atual: {ang} graus")
+
+    fig.canvas.draw_idle()
+
+ani = animation.FuncAnimation(
+    fig, update,
+    interval=200,
+    blit=False,
+    cache_frame_data=False,
+)
 
 plt.tight_layout()
 plt.show()
-
-# ==========================
-# CORRELAÇÃO
-# ==========================
-if correlacao:
-    plt.figure(figsize=(10, 4))
-    plt.plot(correlacao_interp, label="Original (corrigido)")
-    plt.plot(correlacao_suavizada, linestyle='--', label="Suavizada")
-    plt.title("Correlação Cruzada")
-    plt.legend()
-    plt.grid()
-    plt.show()
-else:
-    print("⚠️ Correlação não capturada")
