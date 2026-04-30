@@ -14,8 +14,8 @@ const uint16_t SERVER_PORT = 5005;
 WiFiClient client;
 
 // ==========================
-#define N_MIC1 500
-#define N_MIC2 600
+#define N_MIC1 2500
+#define N_MIC2 2600
 
 #define ADC_CH_MIC1 ADC1_CHANNEL_6 // GPIO34
 #define ADC_CH_MIC2 ADC1_CHANNEL_7 // GPIO35

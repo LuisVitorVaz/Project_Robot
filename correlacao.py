@@ -119,7 +119,7 @@ for ax, titulo in [
     ax.set_xlabel("Amostra")
     ax.set_ylabel("ADC (0-4095)")
     ax.grid(True)
-    ax.set_ylim(0, 4095)
+    ax.set_ylim(0, 4200)
 
 def update(_):
     with lock:
