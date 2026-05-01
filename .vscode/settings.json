@@ -1,3 +1,7 @@
 {
+<<<<<<< HEAD
     "idf.portWin": "COM3"
+=======
+    "idf.portWin": "COM8"
+>>>>>>> 84cf0d6 (enviando arquivos do projeto)
 }
