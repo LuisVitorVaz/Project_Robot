@@ -8,7 +8,7 @@ const char* password = "a1b23e75z123";
 
 WebServer server(80);
 
-// PWM channels
+//  PWM channels
 #define canalPWM1 0
 #define canalPWM2 1
 #define canalPWM3 2
