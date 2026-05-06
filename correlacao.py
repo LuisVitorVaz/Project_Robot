@@ -11,8 +11,10 @@ from scipy.signal import resample
 # ==========================
 # CONFIG
 # ==========================
-HOST = "0.0.0.0"   # 🔥 CORREÇÃO
+HOST = "0.0.0.0"
 PORT = 5005
+
+WINDOW = 500  # 🔥 janela fixa de visualização
 
 # ==========================
 # ESTADO COMPARTILHADO
@@ -65,7 +67,7 @@ def servidor_tcp():
 
                 if linha == "MIC1:":
                     modo = "mic1"
-                    mic1_tmp = []  # 🔥 garante reset
+                    mic1_tmp = []
                     continue
 
                 elif linha == "MIC2:":
@@ -82,7 +84,6 @@ def servidor_tcp():
                     print(f"[RX] mic1={len(mic1_tmp)} mic2={len(mic2_tmp)}")
                     break
 
-                # 🔥 apenas números (RAW ADC)
                 if linha.isdigit():
                     val = int(linha)
 
@@ -121,6 +122,9 @@ for ax, titulo in [
     ax.grid(True)
     ax.set_ylim(0, 4200)
 
+# ==========================
+# UPDATE (AJUSTADO)
+# ==========================
 def update(_):
     with lock:
         if not dados["novo"]:
@@ -130,19 +134,31 @@ def update(_):
         mic1 = dados["mic1"][:]
         mic2 = dados["mic2"][:]
 
+    # === MIC1 ===
     if len(mic1) > 0:
-        line_mic1.set_data(np.arange(len(mic1)), mic1)
-        ax_mic1.set_xlim(0, len(mic1))
+        if len(mic1) > WINDOW:
+            mic1_plot = mic1[-WINDOW:]
+        else:
+            mic1_plot = mic1
 
+        line_mic1.set_data(np.arange(len(mic1_plot)), mic1_plot)
+        ax_mic1.set_xlim(0, WINDOW)
+
+    # === MIC2 ===
     if len(mic2) > 0:
-        line_mic2.set_data(np.arange(len(mic2)), mic2)
-        ax_mic2.set_xlim(0, len(mic2))
+        if len(mic2) > WINDOW:
+            mic2_plot = mic2[-WINDOW:]
+        else:
+            mic2_plot = mic2
+
+        line_mic2.set_data(np.arange(len(mic2_plot)), mic2_plot)
+        ax_mic2.set_xlim(0, WINDOW)
 
     fig.canvas.draw_idle()
 
 ani = animation.FuncAnimation(
     fig, update,
-    interval=100,
+    interval=50,  # 🔥 mais rápido (antes 100)
     blit=False,
     cache_frame_data=False,
 )

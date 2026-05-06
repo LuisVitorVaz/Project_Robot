@@ -14,21 +14,26 @@ const uint16_t SERVER_PORT = 5005;
 WiFiClient client;
 
 // ==========================
-#define N_MIC1 2500
-#define N_MIC2 2600
+// Com amostragem intercalada, N deve ser igual nos dois
+#define N_AMOSTRAS 2500
 
 #define ADC_CH_MIC1 ADC1_CHANNEL_6 // GPIO34
 #define ADC_CH_MIC2 ADC1_CHANNEL_7 // GPIO35
 
+// Delay de 1 conversão em amostras (para compensação na correlação)
+// ~5µs por conversão ADC @ 80MHz clock
+// Se fs efetiva ~ 100kHz intercalado, delay = 1 sample entre canais
+#define DELAY_INTERCALACAO 1
+
 // ==========================
-uint16_t raw1[N_MIC1];
-uint16_t raw2[N_MIC2];
+uint16_t raw1[N_AMOSTRAS];
+uint16_t raw2[N_AMOSTRAS];
 
-int16_t mic1[N_MIC1];
-int16_t mic2[N_MIC2];
+int16_t mic1[N_AMOSTRAS];
+int16_t mic2[N_AMOSTRAS];
 
-uint8_t vetor1_norm[N_MIC1];
-uint8_t vetor2_norm[N_MIC2];
+uint8_t vetor1_norm[N_AMOSTRAS];
+uint8_t vetor2_norm[N_AMOSTRAS];
 
 uint16_t correlacao_resultado[201];
 
@@ -49,31 +54,26 @@ void adc_init() {
 }
 
 // ==========================
-// COLETA ESTÁVEL (SEM I2S)
+// COLETA INTERCALADA — delay mínimo entre canais
 // ==========================
 void coleta_amostras() {
-
-  // MIC1
-  for (int i = 0; i < N_MIC1; i++) {
+  // Coleta alternando MIC1 e MIC2 — delay de apenas 1 conversão entre eles
+  for (int i = 0; i < N_AMOSTRAS; i++) {
     raw1[i] = adc1_get_raw(ADC_CH_MIC1);
-  }
-
-  // MIC2
-  for (int i = 0; i < N_MIC2; i++) {
     raw2[i] = adc1_get_raw(ADC_CH_MIC2);
   }
 
   // DC removal
   uint32_t soma1 = 0, soma2 = 0;
 
-  for (int i = 0; i < N_MIC1; i++) soma1 += raw1[i];
-  for (int i = 0; i < N_MIC2; i++) soma2 += raw2[i];
+  for (int i = 0; i < N_AMOSTRAS; i++) soma1 += raw1[i];
+  for (int i = 0; i < N_AMOSTRAS; i++) soma2 += raw2[i];
 
-  int16_t media1 = soma1 / N_MIC1;
-  int16_t media2 = soma2 / N_MIC2;
+  int16_t media1 = soma1 / N_AMOSTRAS;
+  int16_t media2 = soma2 / N_AMOSTRAS;
 
-  for (int i = 0; i < N_MIC1; i++) mic1[i] = raw1[i] - media1;
-  for (int i = 0; i < N_MIC2; i++) mic2[i] = raw2[i] - media2;
+  for (int i = 0; i < N_AMOSTRAS; i++) mic1[i] = raw1[i] - media1;
+  for (int i = 0; i < N_AMOSTRAS; i++) mic2[i] = raw2[i] - media2;
 }
 
 // ==========================
@@ -133,26 +133,22 @@ void equacao_final() {
 // ENVIO TCP
 // ==========================
 void enviar_dados_socket() {
-
   if (!client.connect(SERVER_IP, SERVER_PORT)) {
     Serial.println("Falha socket");
     return;
   }
 
-  // ===== MIC1 =====
   client.println("MIC1:");
-  for (int i = 0; i < N_MIC1; i++) {
-    client.println(raw1[i]);  // 🔥 RAW 0–4095
+  for (int i = 0; i < N_AMOSTRAS; i++) {
+    client.println(raw1[i]);
   }
 
-  // ===== MIC2 =====
   client.println("MIC2:");
-  for (int i = 0; i < N_MIC2; i++) {
-    client.println(raw2[i]);  // 🔥 RAW 0–4095
+  for (int i = 0; i < N_AMOSTRAS; i++) {
+    client.println(raw2[i]);
   }
 
   client.println("END");
-
   client.stop();
 }
 
@@ -174,26 +170,25 @@ void setup() {
 
 // ==========================
 void loop() {
-
   for (int i = 0; i < 201; i++)
     correlacao_resultado[i] = 0;
 
   coleta_amostras();
 
-  encontrar_maior(mic1, N_MIC1, &maior_mic1);
-  encontrar_maior(mic2, N_MIC2, &maior_mic2);
+  encontrar_maior(mic1, N_AMOSTRAS, &maior_mic1);
+  encontrar_maior(mic2, N_AMOSTRAS, &maior_mic2);
 
   if (maior_mic1 == 0) maior_mic1 = 1;
   if (maior_mic2 == 0) maior_mic2 = 1;
 
-  normalizar_vetor(mic1, vetor1_norm, N_MIC1, maior_mic1);
-  normalizar_vetor(mic2, vetor2_norm, N_MIC2, maior_mic2);
+  normalizar_vetor(mic1, vetor1_norm, N_AMOSTRAS, maior_mic1);
+  normalizar_vetor(mic2, vetor2_norm, N_AMOSTRAS, maior_mic2);
 
   correlacao_cruzada(vetor1_norm, vetor2_norm, correlacao_resultado);
   detectar_angulo(correlacao_resultado);
   equacao_final();
 
-  Serial.printf("angulo=%d\n", angulo_theta);
+  Serial.printf("angulo=%d | max_index=%d\n", angulo_theta, max_index);
 
   enviar_dados_socket();
 
