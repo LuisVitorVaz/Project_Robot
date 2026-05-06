@@ -151,40 +151,73 @@ void handleCommand() {
 // ================= PARSE SERIAL =================
 // Parseia linha recebida do Arduino e salva em `sensores`
 void parsearLinha(const String& linha) {
-  // ACC:x,y,z
-  if (linha.startsWith("ACC:")) {
-    String d = linha.substring(4);
-    int c1 = d.indexOf(','), c2 = d.lastIndexOf(',');
-    if (c1 > 0 && c2 > c1) {
-      sensores.acX = d.substring(0, c1).toFloat();
-      sensores.acY = d.substring(c1 + 1, c2).toFloat();
-      sensores.acZ = d.substring(c2 + 1).toFloat();
+
+  // ================= PACOTE UNICO =================
+  // DATA:acx,acy,acz,gyx,gyy,gyz,tmp,dir,passo,volta,total x4
+  if (linha.startsWith("DATA:")) {
+
+    String d = linha.substring(5);
+
+    float valores[7]; // acX, acY, acZ, gyX, gyY, gyZ, temp
+    int index = 0;
+
+    // ----------- PARSE DOS 7 PRIMEIROS FLOATS -----------
+    for (int i = 0; i < 7; i++) {
+      int virgula = d.indexOf(',');
+      if (virgula == -1) return;
+
+      valores[i] = d.substring(0, virgula).toFloat();
+      d = d.substring(virgula + 1);
     }
-  }
-  // GYR:x,y,z
-  else if (linha.startsWith("GYR:")) {
-    String d = linha.substring(4);
-    int c1 = d.indexOf(','), c2 = d.lastIndexOf(',');
-    if (c1 > 0 && c2 > c1) {
-      sensores.gyX = d.substring(0, c1).toFloat();
-      sensores.gyY = d.substring(c1 + 1, c2).toFloat();
-      sensores.gyZ = d.substring(c2 + 1).toFloat();
+
+    sensores.acX = valores[0];
+    sensores.acY = valores[1];
+    sensores.acZ = valores[2];
+    sensores.gyX = valores[3];
+    sensores.gyY = valores[4];
+    sensores.gyZ = valores[5];
+    sensores.temperatura = valores[6];
+
+    // ----------- PARSE DOS 4 ENCODERS -----------
+    for (int i = 1; i <= 4; i++) {
+
+      // direção
+      int virgula = d.indexOf(',');
+      if (virgula == -1) return;
+      char dir = d.substring(0, virgula)[0];
+      d = d.substring(virgula + 1);
+
+      // passo
+      virgula = d.indexOf(',');
+      if (virgula == -1) return;
+      int passo = d.substring(0, virgula).toInt();
+      d = d.substring(virgula + 1);
+
+      // volta
+      virgula = d.indexOf(',');
+      if (virgula == -1) return;
+      int volta = d.substring(0, virgula).toInt();
+      d = d.substring(virgula + 1);
+
+      // total
+      virgula = d.indexOf(',');
+      int total;
+
+      if (virgula == -1) {
+        total = d.toInt(); // último elemento
+        d = "";
+      } else {
+        total = d.substring(0, virgula).toInt();
+        d = d.substring(virgula + 1);
+      }
+
+      // salva SOMENTE o último encoder (mantendo sua struct intacta)
+      sensores.encoderNum   = i;
+      sensores.encoderDir   = dir;
+      sensores.encoderPasso = passo;
+      sensores.encoderVolta = volta;
+      sensores.encoderAtualizado = true;
     }
-  }
-  // TMP:valor
-  else if (linha.startsWith("TMP:")) {
-    sensores.temperatura = linha.substring(4).toFloat();
-  }
-  // ENC:E1,R,passo=2,volta=1
-  else if (linha.startsWith("ENC:")) {
-    String d = linha.substring(4);
-    sensores.encoderNum   = String(d[1]).toInt();
-    sensores.encoderDir   = (d.indexOf(",R,") != -1) ? 'R' : 'L';
-    int ip = d.indexOf("passo=");
-    int iv = d.indexOf("volta=");
-    if (ip != -1) sensores.encoderPasso = d.substring(ip + 6, d.indexOf(',', ip)).toInt();
-    if (iv != -1) sensores.encoderVolta = d.substring(iv + 6).toInt();
-    sensores.encoderAtualizado = true;
   }
 }
 
