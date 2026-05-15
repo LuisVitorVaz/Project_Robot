@@ -8,14 +8,14 @@
 // ==========================
 const char* WIFI_SSID      = "Carrinho dos Guri";
 const char* WIFI_PASSWORD  = "a1b23e75z123";
-const char* SERVER_IP      = "10.241.8.71";
+const char* SERVER_IP      = "172.17.168.71";
 const uint16_t SERVER_PORT = 5005;
 
 WiFiClient client;
 
 // ==========================
 // Com amostragem intercalada, N deve ser igual nos dois
-#define N_AMOSTRAS 2500
+#define N_AMOSTRAS 500
 
 #define ADC_CH_MIC1 ADC1_CHANNEL_6 // GPIO34
 #define ADC_CH_MIC2 ADC1_CHANNEL_7 // GPIO35
@@ -154,6 +154,7 @@ void enviar_dados_socket() {
 
 // ==========================
 void setup() {
+  
   Serial.begin(115200);
   adc_init();
 
