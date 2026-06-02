@@ -1,3 +1,4 @@
+
 import serial
 import threading
 import numpy as np
@@ -31,7 +32,7 @@ historico_angulo = deque(maxlen=100)
 lock = threading.Lock()
 
 # ==========================
-# THREAD — SERIAL
+# THREAD SERIAL
 # ==========================
 def receptor_serial():
 
@@ -79,7 +80,7 @@ def receptor_serial():
                 continue
 
             # ==========================
-            # FINAL DO PACOTE
+            # FINAL PACOTE
             # ==========================
             elif linha == "END":
 
@@ -92,7 +93,8 @@ def receptor_serial():
                     dados["novo"] = True
 
                 print(
-                    f"[RX] mic1={len(mic1_tmp)} "
+                    f"[RX] "
+                    f"mic1={len(mic1_tmp)} "
                     f"mic2={len(mic2_tmp)}"
                 )
 
@@ -132,7 +134,7 @@ def receptor_serial():
         print("[receiver] serial desconectada")
 
 # ==========================
-# INICIA THREAD
+# THREAD
 # ==========================
 thread = threading.Thread(
     target=receptor_serial,
@@ -142,14 +144,24 @@ thread = threading.Thread(
 thread.start()
 
 # ==========================
-# PLOT
+# FIGURA
 # ==========================
-fig, axes = plt.subplots(2, 2, figsize=(14, 8))
+fig, axes = plt.subplots(
+    3,
+    2,
+    figsize=(14, 10)
+)
 
 ax_mic1 = axes[0, 0]
 ax_mic2 = axes[0, 1]
+
 ax_corr = axes[1, 0]
 ax_ang  = axes[1, 1]
+
+ax_gcc = axes[2, 0]
+
+# painel vazio
+axes[2, 1].axis("off")
 
 # ==========================
 # LINHAS
@@ -162,7 +174,19 @@ line_corr, = ax_corr.plot([], [], lw=1.5)
 
 line_ang, = ax_ang.plot([], [], lw=1.5)
 
+line_gcc, = ax_gcc.plot([], [], lw=1.5)
+
+# ==========================
+# LINHAS VERTICAIS
+# ==========================
 vline_corr = ax_corr.axvline(
+    x=0,
+    color="red",
+    linestyle="--",
+    lw=1
+)
+
+vline_gcc = ax_gcc.axvline(
     x=0,
     color="red",
     linestyle="--",
@@ -173,10 +197,17 @@ vline_corr = ax_corr.axvline(
 # CONFIG EIXOS
 # ==========================
 for ax, titulo in [
+
     (ax_mic1, "MIC1 RAW"),
+
     (ax_mic2, "MIC2 RAW"),
+
     (ax_corr, "Correlação cruzada"),
-    (ax_ang,  "Histórico ângulo"),
+
+    (ax_ang, "Histórico ângulo"),
+
+    (ax_gcc, "GCC-PHAT"),
+
 ]:
 
     ax.set_title(titulo)
@@ -187,13 +218,19 @@ for ax, titulo in [
 
 ax_mic1.set_ylabel("ADC")
 ax_mic2.set_ylabel("ADC")
+
 ax_corr.set_ylabel("Correlação")
+
 ax_ang.set_ylabel("Ângulo")
+
+ax_gcc.set_ylabel("GCC")
 
 ax_mic1.set_ylim(0, 4200)
 ax_mic2.set_ylim(0, 4200)
 
 ax_corr.set_ylim(-1.1, 1.1)
+
+ax_gcc.set_ylim(-1.1, 1.1)
 
 ax_ang.set_ylim(0, 180)
 
@@ -211,7 +248,9 @@ def update(_):
                 line_mic2,
                 line_corr,
                 line_ang,
+                line_gcc,
                 vline_corr,
+                vline_gcc,
             )
 
         dados["novo"] = False
@@ -225,13 +264,7 @@ def update(_):
     # ==========================
     if len(mic1) > 0:
 
-        if len(mic1) > WINDOW:
-
-            mic1_plot = mic1[-WINDOW:]
-
-        else:
-
-            mic1_plot = mic1
+        mic1_plot = mic1[-WINDOW:]
 
         line_mic1.set_data(
             np.arange(len(mic1_plot)),
@@ -245,13 +278,7 @@ def update(_):
     # ==========================
     if len(mic2) > 0:
 
-        if len(mic2) > WINDOW:
-
-            mic2_plot = mic2[-WINDOW:]
-
-        else:
-
-            mic2_plot = mic2
+        mic2_plot = mic2[-WINDOW:]
 
         line_mic2.set_data(
             np.arange(len(mic2_plot)),
@@ -261,7 +288,7 @@ def update(_):
         ax_mic2.set_xlim(0, WINDOW)
 
     # ==========================
-    # CORRELAÇÃO
+    # PROCESSAMENTO
     # ==========================
     if len(mic1) > 200 and len(mic2) > 200:
 
@@ -277,22 +304,24 @@ def update(_):
         v2 = v2 - np.mean(v2)
 
         # ==========================
-        # PASSA-ALTA SIMPLES
+        # FILTRO PASSA ALTA
         # ==========================
         v1[1:] = v1[1:] - v1[:-1]
 
         v2[1:] = v2[1:] - v2[:-1]
 
-        # ==========================
-        # CORRELAÇÃO
-        # ==========================
+        # =====================================================
+        # CORRELAÇÃO NORMAL
+        # =====================================================
         corr = np.correlate(
             v1[:100],
             v2[:100],
             mode="full"
         )
 
-        corr_norm = corr / (np.max(np.abs(corr)) or 1)
+        corr_norm = corr / (
+            np.max(np.abs(corr)) or 1
+        )
 
         pico = np.argmax(corr_norm)
 
@@ -308,9 +337,94 @@ def update(_):
 
         vline_corr.set_xdata([pico])
 
+        # =====================================================
+        # GCC-PHAT
+        # =====================================================
+        N = 1024
+
+        x1 = v1[:N]
+
+        x2 = v2[:N]
+
+        X1 = np.fft.fft(x1)
+
+        X2 = np.fft.fft(x2)
+
+        R = X1 * np.conj(X2)
+
         # ==========================
-        # AJUSTE COMPATÍVEL COM ESP32
+        # PHAT PONDERADO
         # ==========================
+        alpha = 0.5
+
+        R /= (
+            (np.abs(R) ** alpha) + 1e-12
+        )
+
+        gcc = np.fft.ifft(R)
+
+        gcc = np.real(gcc)
+
+        gcc = np.fft.fftshift(gcc)
+
+        gcc_norm = gcc / (
+            np.max(np.abs(gcc)) or 1
+        )
+
+        pico_gcc = np.argmax(gcc_norm)
+
+        # =====================================================
+        # ZOOM CENTRAL
+        # =====================================================
+        centro = len(gcc_norm) // 2
+
+        janela = 80
+
+        inicio = centro - janela
+        fim    = centro + janela
+
+        gcc_zoom = gcc_norm[inicio:fim]
+
+        # =====================================================
+        # SUAVIZAÇÃO VISUAL
+        # =====================================================
+        kernel = np.ones(5) / 5.0
+
+        gcc_suave = np.convolve(
+            gcc_zoom,
+            kernel,
+            mode="same"
+        )
+
+        # =====================================================
+        # NORMALIZA NOVAMENTE
+        # =====================================================
+        gcc_suave = gcc_suave / (
+            np.max(np.abs(gcc_suave)) + 1e-12
+        )
+
+        # =====================================================
+        # PICO LOCAL
+        # =====================================================
+        pico_local = pico_gcc - inicio
+
+        line_gcc.set_data(
+            np.arange(len(gcc_suave)),
+            gcc_suave
+        )
+
+        ax_gcc.set_xlim(
+            0,
+            len(gcc_suave)
+        )
+
+        ax_gcc.set_ylim(-1.1, 1.1)
+
+        vline_gcc.set_xdata([pico_local])
+
+        # =====================================================
+        # ÂNGULO
+        # =====================================================
         max_index = pico + 1
 
         angulo = int(
@@ -319,7 +433,10 @@ def update(_):
             0.122
         )
 
-        angulo = max(0, min(180, angulo))
+        angulo = max(
+            0,
+            min(180, angulo)
+        )
 
         historico_angulo.append(angulo)
 
@@ -334,7 +451,9 @@ def update(_):
         )
 
         print(
-            f"[PLOT] max_index={max_index} "
+            f"[PLOT] "
+            f"corr={pico} "
+            f"gcc={pico_gcc} "
             f"angulo={angulo}°"
         )
 
@@ -343,7 +462,9 @@ def update(_):
         line_mic2,
         line_corr,
         line_ang,
+        line_gcc,
         vline_corr,
+        vline_gcc,
     )
 
 # ==========================
@@ -360,3 +481,4 @@ ani = animation.FuncAnimation(
 plt.tight_layout()
 
 plt.show()
+

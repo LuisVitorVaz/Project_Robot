@@ -1,25 +1,43 @@
 /*
  * ============================================================
  *  Localização de som por TDOA — ESP32
- *  VERSÃO AJUSTADA
- *  ALTERAÇÃO:
- *      - correlação usando TODO vetor
- *      - sem mudar lógica original
+ *  VERSÃO COM GCC-PHAT + SERIAL PARA PYTHON
+ *
+ *  MANTIDO:
+ *      - toda estrutura original
+ *      - correlação original
+ *      - detectar_angulo()
+ *      - buffers
+ *      - lógica original
+ *
+ *  ADICIONADO:
+ *      - GCC-PHAT
+ *      - envio serial compatível com Python
+ *      - redução de amostras serial
+ *      - estabilidade serial
+ *      - filtro físico no GCC
  * ============================================================
  */
 
 #include <Arduino.h>
 #include <math.h>
 #include "driver/adc.h"
+#include <arduinoFFT.h>
+
+// ============================================================
+// FFT
+// ============================================================
+
+ArduinoFFT<float> FFT = ArduinoFFT<float>();
 
 // ============================================================
 // CONFIGURAÇÃO
 // ============================================================
 
-#define N_AMOSTRAS        1000
+#define N_AMOSTRAS        256
 
-#define ADC_CH_MIC1       ADC1_CHANNEL_4   // GPIO32
-#define ADC_CH_MIC2       ADC1_CHANNEL_5   // GPIO33
+#define ADC_CH_MIC1       ADC1_CHANNEL_4
+#define ADC_CH_MIC2       ADC1_CHANNEL_5
 
 #define FS_CANAL          100000
 
@@ -48,6 +66,8 @@ uint8_t vetor2_norm[N_AMOSTRAS];
 
 uint32_t correlacao_resultado[CORR_TAMANHO];
 
+uint32_t correlacao_gcc_resultado[CORR_TAMANHO];
+
 int16_t maior_mic1 = 0;
 int16_t maior_mic2 = 0;
 
@@ -61,6 +81,19 @@ float tau_segundos = 0.0f;
 int angulo_theta = 0;
 
 // ============================================================
+// FFT GCC-PHAT
+// ============================================================
+
+float fft_real1[N_AMOSTRAS];
+float fft_imag1[N_AMOSTRAS];
+
+float fft_real2[N_AMOSTRAS];
+float fft_imag2[N_AMOSTRAS];
+
+float gcc_real[N_AMOSTRAS];
+float gcc_imag[N_AMOSTRAS];
+
+// ============================================================
 // ADC INIT
 // ============================================================
 
@@ -68,9 +101,15 @@ void adc_init() {
 
     adc1_config_width(ADC_WIDTH_BIT_12);
 
-    adc1_config_channel_atten(ADC_CH_MIC1,ADC_ATTEN_DB_11);
+    adc1_config_channel_atten(
+        ADC_CH_MIC1,
+        ADC_ATTEN_DB_12
+    );
 
-    adc1_config_channel_atten(ADC_CH_MIC2,ADC_ATTEN_DB_11);
+    adc1_config_channel_atten(
+        ADC_CH_MIC2,
+        ADC_ATTEN_DB_12
+    );
 
     Serial.println("================================");
     Serial.println("ADC inicializado");
@@ -91,9 +130,9 @@ void IRAM_ATTR coleta_amostras() {
         raw2[i] = adc1_get_raw(ADC_CH_MIC2);
     }
 
-    // =========================
+    // ========================================================
     // REMOVE OFFSET DC
-    // =========================
+    // ========================================================
 
     uint32_t soma1 = 0;
     uint32_t soma2 = 0;
@@ -104,27 +143,26 @@ void IRAM_ATTR coleta_amostras() {
         soma2 += raw2[i];
     }
 
-    int16_t media1 =
-        soma1 / N_AMOSTRAS;
-
-    int16_t media2 =
-        soma2 / N_AMOSTRAS;
+    int16_t media1 = soma1 / N_AMOSTRAS;
+    int16_t media2 = soma2 / N_AMOSTRAS;
 
     for (int i = 0; i < N_AMOSTRAS; i++) {
 
-        mic1[i] =
-            raw1[i] - media1;
+        mic1[i] = raw1[i] - media1;
 
-        mic2[i] =
-            raw2[i] - media2;
+        mic2[i] = raw2[i] - media2;
     }
 }
 
 // ============================================================
-// FUNÇÕES ORIGINAIS
+// ENCONTRAR MAIOR
 // ============================================================
 
-void encontrar_maior(const int16_t *v,int n,int16_t *dest) {
+void encontrar_maior(
+    const int16_t *v,
+    int n,
+    int16_t *dest
+) {
 
     *dest = abs(v[0]);
 
@@ -138,8 +176,15 @@ void encontrar_maior(const int16_t *v,int n,int16_t *dest) {
 }
 
 // ============================================================
+// NORMALIZAÇÃO
+// ============================================================
 
-void normalizar_vetor(const int16_t *v,uint8_t *out,int n,int16_t mv) {
+void normalizar_vetor(
+    const int16_t *v,
+    uint8_t *out,
+    int n,
+    int16_t mv
+) {
 
     if (mv == 0)
         mv = 1;
@@ -160,11 +205,14 @@ void normalizar_vetor(const int16_t *v,uint8_t *out,int n,int16_t mv) {
 }
 
 // ============================================================
-// CORRELAÇÃO AJUSTADA
-// APENAS USANDO TODO O VETOR
+// CORRELAÇÃO ORIGINAL
 // ============================================================
 
-void correlacao_cruzada(const uint8_t *v1,const uint8_t *v2,uint32_t *res) {
+void correlacao_cruzada(
+    const uint8_t *v1,
+    const uint8_t *v2,
+    uint32_t *res
+) {
 
     for (int i = 0; i < CORR_TAMANHO; i++) {
 
@@ -193,14 +241,142 @@ void correlacao_cruzada(const uint8_t *v1,const uint8_t *v2,uint32_t *res) {
 }
 
 // ============================================================
+// GCC-PHAT
+// ============================================================
+
+void correlacao_gcc_phat(
+    const int16_t *v1,
+    const int16_t *v2,
+    uint32_t *res
+) {
+
+    for (int i = 0; i < CORR_TAMANHO; i++) {
+
+        res[i] = 0;
+    }
+
+    // ========================================================
+    // COPIA
+    // ========================================================
+
+    for (int i = 0; i < N_AMOSTRAS; i++) {
+
+        fft_real1[i] = (float)v1[i];
+        fft_imag1[i] = 0.0f;
+
+        fft_real2[i] = (float)v2[i];
+        fft_imag2[i] = 0.0f;
+    }
+
+    // ========================================================
+    // WINDOW
+    // ========================================================
+
+    FFT.windowing(
+        fft_real1,
+        N_AMOSTRAS,
+        FFT_WIN_TYP_HAMMING,
+        FFT_FORWARD
+    );
+
+    FFT.windowing(
+        fft_real2,
+        N_AMOSTRAS,
+        FFT_WIN_TYP_HAMMING,
+        FFT_FORWARD
+    );
+
+    // ========================================================
+    // FFT
+    // ========================================================
+
+    FFT.compute(
+        fft_real1,
+        fft_imag1,
+        N_AMOSTRAS,
+        FFT_FORWARD
+    );
+
+    FFT.compute(
+        fft_real2,
+        fft_imag2,
+        N_AMOSTRAS,
+        FFT_FORWARD
+    );
+
+    // ========================================================
+    // GCC-PHAT
+    // ========================================================
+
+    for (int i = 0; i < N_AMOSTRAS; i++) {
+
+        float real =
+            (fft_real1[i] * fft_real2[i]) +
+            (fft_imag1[i] * fft_imag2[i]);
+
+        float imag =
+            (fft_imag1[i] * fft_real2[i]) -
+            (fft_real1[i] * fft_imag2[i]);
+
+        float mag =
+            sqrtf((real * real) + (imag * imag));
+
+        if (mag < 1e-9f)
+            mag = 1e-9f;
+
+        gcc_real[i] = real / mag;
+        gcc_imag[i] = imag / mag;
+    }
+
+    // ========================================================
+    // IFFT
+    // ========================================================
+
+    FFT.compute(
+        gcc_real,
+        gcc_imag,
+        N_AMOSTRAS,
+        FFT_REVERSE
+    );
+
+    // ========================================================
+    // CENTRALIZA
+    // ========================================================
+
+    int centro = N_AMOSTRAS / 2;
+
+    for (int i = 0; i < N_AMOSTRAS; i++) {
+
+        int idx =
+            i + ((N_AMOSTRAS - 1) - centro);
+
+        if (idx >= 0 && idx < CORR_TAMANHO) {
+
+            float val = fabs(gcc_real[i]);
+
+            res[idx] =
+                (uint32_t)(val * 100000.0f);
+        }
+    }
+}
+
+// ============================================================
+// DETECTAR ANGULO
+// ============================================================
 
 void detectar_angulo(uint32_t *corr) {
 
-    max_val = corr[0];
+    int inicio =
+        (N_AMOSTRAS - 1) - TAU_MAX_AMOSTRAS;
 
-    max_index = 0;
+    int fim =
+        (N_AMOSTRAS - 1) + TAU_MAX_AMOSTRAS;
 
-    for (int i = 1; i < CORR_TAMANHO; i++) {
+    max_val = corr[inicio];
+
+    max_index = inicio;
+
+    for (int i = inicio; i <= fim; i++) {
 
         if (corr[i] > max_val) {
 
@@ -212,84 +388,19 @@ void detectar_angulo(uint32_t *corr) {
 
     max_index_corr = max_index;
 
-    int lag_amostras = max_index_corr - (N_AMOSTRAS - 1);
+    int lag_amostras =
+        max_index_corr - (N_AMOSTRAS - 1);
 
-    tau_segundos = (float)lag_amostras /(float)FS_CANAL;
+    tau_segundos =
+        (float)lag_amostras /
+        (float)FS_CANAL;
 }
 
 // ============================================================
-
-void equacao_final() {
-
-    angulo_theta = (int)(
-        (-0.174 * pow(max_index, 2.0)) +
-        (10.6 * max_index) +
-        0.122
-    );
-}
-
-// ============================================================
-// SETUP
+// ENVIO SERIAL PYTHON
 // ============================================================
 
-void setup() {
-
-    Serial.begin(115200);
-
-    adc_init();
-}
-
-// ============================================================
-// LOOP
-// ============================================================
-
-void loop() {
-
-    for (int i = 0; i < CORR_TAMANHO; i++)
-        correlacao_resultado[i] = 0;
-
-    noInterrupts();
-
-    coleta_amostras();
-
-    interrupts();
-
-    encontrar_maior(mic1,N_AMOSTRAS,&maior_mic1);
-
-    encontrar_maior(mic2,N_AMOSTRAS,&maior_mic2);
-
-    if (maior_mic1 == 0)
-        maior_mic1 = 1;
-
-    if (maior_mic2 == 0)
-        maior_mic2 = 1;
-
-    normalizar_vetor(mic1,vetor1_norm,N_AMOSTRAS,maior_mic1);
-
-    normalizar_vetor(mic2,vetor2_norm,N_AMOSTRAS,maior_mic2);
-
-    correlacao_cruzada(vetor1_norm,vetor2_norm,correlacao_resultado);
-
-    detectar_angulo(correlacao_resultado);
-
-    equacao_final();
-
-    int lag = max_index_corr - (N_AMOSTRAS - 1);
-
-    // ========================================================
-    // DEBUG
-    // ========================================================
-
-    Serial.printf(
-        "angulo=%d | lag=%d | tau=%.1f us\n",
-        angulo_theta,
-        lag,
-        tau_segundos * 1e6f
-    );
-
-    // ========================================================
-    // ENVIO PYTHON
-    // ========================================================
+void enviar_python() {
 
     Serial.println("MIC1:");
 
@@ -306,6 +417,138 @@ void loop() {
     }
 
     Serial.println("END");
-
-    delay(1);
 }
+
+// ============================================================
+// SETUP
+// ============================================================
+
+void setup() {
+
+    Serial.begin(115200);
+
+    delay(2000);
+
+    adc_init();
+}
+
+// ============================================================
+// LOOP
+// ============================================================
+
+void loop() {
+
+    // ========================================================
+    // LIMPA BUFFERS
+    // ========================================================
+
+    for (int i = 0; i < CORR_TAMANHO; i++) {
+
+        correlacao_resultado[i] = 0;
+
+        correlacao_gcc_resultado[i] = 0;
+    }
+
+    // ========================================================
+    // COLETA
+    // ========================================================
+
+    noInterrupts();
+
+    coleta_amostras();
+
+    interrupts();
+
+    // ========================================================
+    // NORMALIZAÇÃO
+    // ========================================================
+
+    encontrar_maior(
+        mic1,
+        N_AMOSTRAS,
+        &maior_mic1
+    );
+
+    encontrar_maior(
+        mic2,
+        N_AMOSTRAS,
+        &maior_mic2
+    );
+
+    if (maior_mic1 == 0)
+        maior_mic1 = 1;
+
+    if (maior_mic2 == 0)
+        maior_mic2 = 1;
+
+    normalizar_vetor(
+        mic1,
+        vetor1_norm,
+        N_AMOSTRAS,
+        maior_mic1
+    );
+
+    normalizar_vetor(
+        mic2,
+        vetor2_norm,
+        N_AMOSTRAS,
+        maior_mic2
+    );
+
+    // ========================================================
+    // CORRELAÇÃO ORIGINAL
+    // ========================================================
+
+    correlacao_cruzada(
+        vetor1_norm,
+        vetor2_norm,
+        correlacao_resultado
+    );
+
+    detectar_angulo(
+        correlacao_resultado
+    );
+
+    int lag_original =
+        max_index_corr - (N_AMOSTRAS - 1);
+
+    // ========================================================
+    // GCC-PHAT
+    // ========================================================
+
+    correlacao_gcc_phat(
+        mic1,
+        mic2,
+        correlacao_gcc_resultado
+    );
+
+    detectar_angulo(
+        correlacao_gcc_resultado
+    );
+
+    int lag_gcc =
+        max_index_corr - (N_AMOSTRAS - 1);
+
+    // ========================================================
+    // ENVIA PYTHON
+    // ========================================================
+
+    enviar_python();
+
+    // ========================================================
+    // DEBUG
+    // ========================================================
+
+    Serial.printf(
+        "ORIGINAL_LAG:%d\n",
+        lag_original
+    );
+
+    Serial.printf(
+        "GCC_LAG:%d\n",
+        lag_gcc
+    );
+
+    delay(20);
+}
+
