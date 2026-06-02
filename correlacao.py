@@ -1,4 +1,4 @@
-import socket
+import serial
 import threading
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,8 +8,8 @@ from collections import deque
 # ==========================
 # CONFIG
 # ==========================
-HOST = "0.0.0.0"
-PORT = 5005
+SERIAL_PORT = "COM6"
+BAUDRATE = 115200
 
 WINDOW = 500
 
@@ -31,127 +31,111 @@ historico_angulo = deque(maxlen=100)
 lock = threading.Lock()
 
 # ==========================
-# THREAD — servidor TCP
+# THREAD — SERIAL
 # ==========================
-def servidor_tcp():
+def receptor_serial():
 
-    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    ser = serial.Serial(
+        SERIAL_PORT,
+        BAUDRATE,
+        timeout=1
+    )
 
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    print(f"[receiver] Serial conectada em {SERIAL_PORT}")
 
-    srv.bind((HOST, PORT))
+    mic1_tmp = []
+    mic2_tmp = []
 
-    srv.listen(1)
+    modo = None
 
-    print(f"[receiver] Servidor TCP ouvindo em {HOST}:{PORT}")
+    try:
 
-    while True:
+        while True:
 
-        conn, addr = srv.accept()
+            linha = ser.readline().decode(
+                errors="ignore"
+            ).strip()
 
-        print(f"[receiver] ESP32 conectada: {addr}")
+            if not linha:
+                continue
 
-        buf = ""
+            # ==========================
+            # HEADERS
+            # ==========================
+            if linha == "MIC1:":
 
-        mic1_tmp = []
-        mic2_tmp = []
+                modo = "mic1"
 
-        modo = None
+                mic1_tmp = []
 
-        try:
+                continue
 
-            while True:
+            elif linha == "MIC2:":
 
-                chunk = conn.recv(4096)
+                modo = "mic2"
 
-                if not chunk:
-                    break
+                mic2_tmp = []
 
-                buf += chunk.decode(errors="ignore")
+                continue
 
-                while "\n" in buf:
+            # ==========================
+            # FINAL DO PACOTE
+            # ==========================
+            elif linha == "END":
 
-                    linha, buf = buf.split("\n", 1)
+                with lock:
 
-                    linha = linha.strip()
+                    dados["mic1"] = mic1_tmp[:]
 
-                    if not linha:
-                        continue
+                    dados["mic2"] = mic2_tmp[:]
 
-                    # ==========================
-                    # HEADERS
-                    # ==========================
-                    if linha == "MIC1:":
+                    dados["novo"] = True
 
-                        modo = "mic1"
+                print(
+                    f"[RX] mic1={len(mic1_tmp)} "
+                    f"mic2={len(mic2_tmp)}"
+                )
 
-                        mic1_tmp = []
+                mic1_tmp = []
+                mic2_tmp = []
 
-                        continue
+                modo = None
 
-                    elif linha == "MIC2:":
+                continue
 
-                        modo = "mic2"
+            # ==========================
+            # DADOS
+            # ==========================
+            try:
 
-                        mic2_tmp = []
+                val = int(linha)
 
-                        continue
+                if modo == "mic1":
 
-                    # ==========================
-                    # FINAL DO PACOTE
-                    # ==========================
-                    elif linha == "END":
+                    mic1_tmp.append(val)
 
-                        with lock:
+                elif modo == "mic2":
 
-                            dados["mic1"] = mic1_tmp[:]
+                    mic2_tmp.append(val)
 
-                            dados["mic2"] = mic2_tmp[:]
+            except:
+                pass
 
-                            dados["novo"] = True
+    except Exception as e:
 
-                        print(
-                            f"[RX] mic1={len(mic1_tmp)} "
-                            f"mic2={len(mic2_tmp)}"
-                        )
+        print(f"[receiver] erro: {e}")
 
-                        mic1_tmp = []
-                        mic2_tmp = []
+    finally:
 
-                        modo = None
+        ser.close()
 
-                        continue
-
-                    # ==========================
-                    # DADOS
-                    # ==========================
-                    if linha.isdigit():
-
-                        val = int(linha)
-
-                        if modo == "mic1":
-
-                            mic1_tmp.append(val)
-
-                        elif modo == "mic2":
-
-                            mic2_tmp.append(val)
-
-        except Exception as e:
-
-            print(f"[receiver] erro: {e}")
-
-        finally:
-
-            conn.close()
-
-            print("[receiver] desconectado")
+        print("[receiver] serial desconectada")
 
 # ==========================
 # INICIA THREAD
 # ==========================
 thread = threading.Thread(
-    target=servidor_tcp,
+    target=receptor_serial,
     daemon=True
 )
 
@@ -285,13 +269,26 @@ def update(_):
 
         v2 = np.array(mic2, dtype=np.float32)
 
+        # ==========================
+        # REMOVE OFFSET DC
+        # ==========================
         v1 = v1 - np.mean(v1)
 
         v2 = v2 - np.mean(v2)
 
+        # ==========================
+        # PASSA-ALTA SIMPLES
+        # ==========================
+        v1[1:] = v1[1:] - v1[:-1]
+
+        v2[1:] = v2[1:] - v2[:-1]
+
+        # ==========================
+        # CORRELAÇÃO
+        # ==========================
         corr = np.correlate(
-            v1[:200],
-            v2[:200],
+            v1[:100],
+            v2[:100],
             mode="full"
         )
 
@@ -311,7 +308,10 @@ def update(_):
 
         vline_corr.set_xdata([pico])
 
-        max_index = pico
+        # ==========================
+        # AJUSTE COMPATÍVEL COM ESP32
+        # ==========================
+        max_index = pico + 1
 
         angulo = int(
             (-0.174 * (max_index ** 2)) +
