@@ -1,335 +1,373 @@
 import serial
 import threading
+import queue
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-from collections import deque
+import time
+import csv
+from datetime import datetime
 
-# ==========================
-# CONFIG
-# ==========================
-SERIAL_PORT = "COM6"
-BAUDRATE = 115200
-
-WINDOW = 250
+# ==========================================================
+# CONFIGURAÇÕES GERAIS
+# ==========================================================
+SERIAL_PORT_MASTER = "COM4"   # ESP32 MASTER -> MIC1
+SERIAL_PORT_SLAVE  = "COM6"   # ESP32 SLAVE  -> MIC2
+BAUDRATE = 921600
 
 N_AMOSTRAS = 256
+# TAU_MAX_AMOSTRAS = 58
+CORR_TAMANHO = (2 * N_AMOSTRAS) - 1
+WINDOW = 250   # amostras exibidas no gráfico ao vivo
 
-# ==========================
-# ESTADO COMPARTILHADO
-# ==========================
-dados = {
-    "mic1": [],
-    "mic2": [],
-    "lag": None,       # ORIGINAL_LAG recebido do ESP32
-    "novo": False,
-}
+# ---- Configurações do experimento ----
+ANGULOS = [0, 45, 90, 135, 180]      # ângulos que serão testados, nesta ordem
+DURACAO_TESTE_SEGUNDOS = 120         # 2 minutos por ângulo
 
-historico_pico    = deque(maxlen=100)
-buffer_mediana    = deque(maxlen=10)
 
-lock = threading.Lock()
+TIMESTAMP_EXECUCAO = datetime.now().strftime("%Y%m%d_%H%M%S")
+ARQUIVO_TABELA = f"tabela_resultados_{TIMESTAMP_EXECUCAO}.csv"
+ARQUIVO_BRUTO  = f"dados_brutos_{TIMESTAMP_EXECUCAO}.csv"
+ARQUIVO_GRAFICO = f"grafico_correlacao_por_angulo_{TIMESTAMP_EXECUCAO}.png"
 
-# ==========================
-# THREAD SERIAL
-# ==========================
-def receptor_serial():
+# ==========================================================
+# ESTADO COMPARTILHADO (agora via filas, para não perder blocos)
+# ==========================================================
+# Cada bloco completo recebido (entre "MIC:" e "END") é colocado na fila
+# correspondente. O loop principal só remove da fila quando vai processar,
+# então nenhum bloco é sobrescrito antes de ser usado.
+fila_mic1 = queue.Queue()
+fila_mic2 = queue.Queue()
 
-    ser = serial.Serial(
-        SERIAL_PORT,
-        BAUDRATE,
-        timeout=1
-    )
+# ==========================================================
+# FUNÇÕES MATEMÁTICAS
+# ==========================================================
 
-    print(f"[receiver] Serial conectada em {SERIAL_PORT}")
+def normalizar(sinal):
+    """Remove DC (subtrai a média) e normaliza pela amplitude (divide pelo desvio padrão)."""
+    arr = np.asarray(sinal, dtype=np.float64)
+    media = np.mean(arr)
+    desvio = np.std(arr)
+    if desvio == 0:
+        return arr - media
+    return (arr - media) / desvio
 
-    mic1_tmp = []
-    mic2_tmp = []
-    lag_tmp  = None
-    modo     = None
+#     """Correlação cruzada entre dois sinais já normalizados (float)."""
+
+def correlacao_cruzada(Mic1, Mic2):
+    res = np.zeros(CORR_TAMANHO, dtype=np.float64)
+    for i in range(CORR_TAMANHO):
+        soma = 0.0
+        k = N_AMOSTRAS - 1
+        j = 0
+        # 
+        # if j > (N_AMOSTRAS - 1):   
+        #     k -= (j - (N_AMOSTRAS - 1)) 
+        #     j = N_AMOSTRAS - 1
+        while j <= N_AMOSTRAS - 1 and k >= 0:
+            soma += Mic2[k] * Mic1[j]
+            j += 1
+            k -= 1
+            res[j] = soma /j
+    return res
+
+#     """Retorna (indice_do_pico, valor_do_pico) dentro da janela de busca ao redor do centro."""
+
+# def encontrar_pico(corr):
+#     inicio = (N_AMOSTRAS - 1) - TAU_MAX_AMOSTRAS
+#     fim = (N_AMOSTRAS - 1) + TAU_MAX_AMOSTRAS
+
+#     max_val = corr[inicio]
+#     max_index = inicio
+
+#     for i in range(inicio, fim + 1):
+#         if corr[i] > max_val:
+#             max_val = corr[i]
+#             max_index = i
+
+#     return max_index, max_val
+# argmax funcao que procura o maior valor no vetor e retorna a posicao
+def encontrar_pico(corr):
+    max_index = np.argmax(corr)
+    max_val = corr[max_index]
+    return max_index, max_val
+
+
+# ==========================================================
+# THREAD SERIAL (agora coloca cada bloco completo na fila)
+# ==========================================================
+def receptor_serial(porta, fila_destino, nome_log):
+    try:
+        ser = serial.Serial(porta, BAUDRATE, timeout=1)
+        ser.reset_input_buffer()
+        print(f"[receiver:{nome_log}] Serial conectada em {porta}")
+    except Exception as e:
+        print(f"Erro ao abrir {porta}: {e}")
+        return
+
+    mic_tmp = []
+    modo    = None
 
     try:
-
         while True:
-
-            linha = ser.readline().decode(
-                errors="ignore"
-            ).strip()
+            linha = ser.readline().decode(errors="ignore").strip()
 
             if not linha:
                 continue
 
-            # ==========================
-            # HEADERS
-            # ==========================
-            if linha == "MIC1:":
-                modo     = "mic1"
-                mic1_tmp = []
+            if linha.startswith("DEVICE:") or linha.startswith("FS:"):
                 continue
 
-            elif linha == "MIC2:":
-                modo     = "mic2"
-                mic2_tmp = []
+            elif linha == "MIC:":
+                modo    = "mic"
+                mic_tmp = []
                 continue
 
-            # ==========================
-            # LAG DO MICROCONTROLADOR
-            # ==========================
-            elif linha.startswith("ORIGINAL_LAG:"):
-                try:
-                    lag_tmp = int(linha.split(":")[1])
-                except:
-                    pass
-                continue
-
-            # GCC_LAG ignorado
-            elif linha.startswith("GCC_LAG:"):
-                continue
-
-            # ==========================
-            # FINAL PACOTE
-            # ==========================
             elif linha == "END":
-
-                with lock:
-                    dados["mic1"] = mic1_tmp[:]
-                    dados["mic2"] = mic2_tmp[:]
-                    dados["lag"]  = lag_tmp
-                    dados["novo"] = True
-
-                print(
-                    f"[RX] "
-                    f"mic1={len(mic1_tmp)} "
-                    f"mic2={len(mic2_tmp)} "
-                    f"lag={lag_tmp}"
-                )
-
-                mic1_tmp = []
-                mic2_tmp = []
-                lag_tmp  = None
-                modo     = None
+                # Coloca o bloco completo na fila (não sobrescreve nada,
+                # cada bloco fica esperando até ser consumido no loop principal)
+                fila_destino.put(mic_tmp[:])
+                mic_tmp = []
+                modo    = None
                 continue
 
-            # ==========================
-            # DADOS
-            # ==========================
             try:
                 val = int(linha)
-
-                if modo == "mic1":
-                    mic1_tmp.append(val)
-
-                elif modo == "mic2":
-                    mic2_tmp.append(val)
-
+                if modo == "mic":
+                    mic_tmp.append(val)
             except:
                 pass
 
     except Exception as e:
-        print(f"[receiver] erro: {e}")
+        print(f"[receiver:{nome_log}] erro: {e}")
 
     finally:
         ser.close()
-        print("[receiver] serial desconectada")
+        print(f"[receiver:{nome_log}] serial desconectada")
 
-# ==========================
-# THREAD
-# ==========================
-thread = threading.Thread(
-    target=receptor_serial,
-    daemon=True
-)
+thread_master = threading.Thread(target=receptor_serial, args=(SERIAL_PORT_MASTER, fila_mic1, "mic1"), daemon=True)
+thread_slave  = threading.Thread(target=receptor_serial, args=(SERIAL_PORT_SLAVE, fila_mic2, "mic2"), daemon=True)
+thread_master.start()
+thread_slave.start()
 
-thread.start()
+# ==========================================================
+# JANELA DE MONITORAMENTO AO VIVO (mantida)
+# ==========================================================
+plt.ion()
+fig, (ax_mic1, ax_mic2) = plt.subplots(1, 2, figsize=(11, 4))
+line_mic1, = ax_mic1.plot([], [], lw=1.2, color="#1f77b4")
+line_mic2, = ax_mic2.plot([], [], lw=1.2, color="#ff7f0e")
 
-# ==========================
-# FIGURA  — 2x2, mesmo layout original
-# ==========================
-fig, axes = plt.subplots(
-    2,
-    2,
-    figsize=(14, 8)
-)
-
-ax_mic1      = axes[0, 0]
-ax_mic2      = axes[0, 1]
-ax_corr      = axes[1, 0]
-ax_historico = axes[1, 1]
-
-# ==========================
-# LINHAS
-# ==========================
-line_mic1,      = ax_mic1.plot([], [], lw=1.5, color="#1f77b4")
-line_mic2,      = ax_mic2.plot([], [], lw=1.5, color="#ff7f0e")
-line_corr,      = ax_corr.plot([], [], lw=1.5, color="#2ca02c")
-line_historico, = ax_historico.plot([], [], lw=1.5, color="#9467bd")
-
-vline_corr = ax_corr.axvline(
-    x=0,
-    color="red",
-    linestyle="--",
-    lw=1
-)
-
-# ==========================
-# CONFIG EIXOS
-# ==========================
-for ax, titulo in [
-    (ax_mic1,      "MIC1 RAW"),
-    (ax_mic2,      "MIC2 RAW"),
-    (ax_corr,      "Correlação cruzada"),
-    (ax_historico, "Histórico posição do pico (mediana)"),
-]:
+for ax, titulo in [(ax_mic1, "MIC1 (MASTER)"), (ax_mic2, "MIC2 (SLAVE)")]:
     ax.set_title(titulo)
     ax.set_xlabel("Amostra")
+    ax.set_ylabel("ADC")
+    ax.set_ylim(-2100, 2100)
+    ax.set_xlim(0, WINDOW)
     ax.grid(True)
 
-ax_mic1.set_ylabel("ADC")
-ax_mic2.set_ylabel("ADC")
-ax_corr.set_ylabel("Correlação")
-ax_historico.set_ylabel("Posição do pico")
+fig.tight_layout()
+plt.show(block=False)
+fig.canvas.draw()
+fig.canvas.flush_events()
 
-ax_mic1.set_ylim(0, 4200)
-ax_mic2.set_ylim(0, 4200)
-ax_corr.set_ylim(-1.1, 1.1)
-
-# ==========================
-# UPDATE
-# ==========================
-def update(_):
-
-    with lock:
-
-        if not dados["novo"]:
-            return (
-                line_mic1,
-                line_mic2,
-                line_corr,
-                line_historico,
-                vline_corr,
-            )
-
-        dados["novo"] = False
-
-        mic1 = dados["mic1"][:]
-        mic2 = dados["mic2"][:]
-        lag  = dados["lag"]
-
-    # ==========================
-    # MIC1
-    # ==========================
+def atualizar_grafico_ao_vivo(mic1, mic2, angulo_atual, segundos_restantes):
     if len(mic1) > 0:
-        mic1_plot = mic1[-WINDOW:]
-        line_mic1.set_data(
-            np.arange(len(mic1_plot)),
-            mic1_plot
-        )
-        ax_mic1.set_xlim(0, WINDOW)
-
-    # ==========================
-    # MIC2
-    # ==========================
+        m1 = mic1[-WINDOW:]
+        line_mic1.set_data(np.arange(len(m1)), m1)
     if len(mic2) > 0:
-        mic2_plot = mic2[-WINDOW:]
-        line_mic2.set_data(
-            np.arange(len(mic2_plot)),
-            mic2_plot
-        )
-        ax_mic2.set_xlim(0, WINDOW)
+        m2 = mic2[-WINDOW:]
+        line_mic2.set_data(np.arange(len(m2)), m2)
+    fig.suptitle(f"Ângulo atual: {angulo_atual}°  |  Tempo restante: {segundos_restantes:.0f}s")
+    fig.canvas.draw_idle()
+    plt.pause(0.001)
 
-    # ==========================
-    # CORRELAÇÃO — calculada no Python com os
-    # dados brutos recebidos, apenas para exibição.
-    # O pico (vline) vem do ORIGINAL_LAG do ESP32.
-    # ==========================
-    if len(mic1) >= N_AMOSTRAS and len(mic2) >= N_AMOSTRAS:
+# ==========================================================
+# ARQUIVO DE DADOS BRUTOS (uma linha por bloco processado)
+# ==========================================================
+arquivo_bruto = open(ARQUIVO_BRUTO, mode="w", newline="", encoding="utf-8")
+escritor_bruto = csv.writer(arquivo_bruto)
+escritor_bruto.writerow(["angulo", "timestamp", "posicao_correlacao_maxima"])
 
-        v1 = np.array(mic1[:N_AMOSTRAS], dtype=np.float32)
-        v2 = np.array(mic2[:N_AMOSTRAS], dtype=np.float32)
+# ==========================================================
+# EXPORTAÇÃO DO MELHOR BLOCO DE CADA ÂNGULO PARA .XLSX
+# (formato compatível com o script de validação: colunas "Mic1"/"Mic2",
+#  256 linhas = N_AMOSTRAS, sem índice)
+# ==========================================================
+def salvar_melhor_bloco_xlsx(angulo, mic1_raw, mic2_raw, pico_valor):
+    """Salva o par de blocos brutos (256 amostras cada) que produziu o maior
+    pico de correlação naquele ângulo, no formato Mic1/Mic2 esperado pelo
+    script de validação/teste (senoides_...xlsx)."""
+    nome_arquivo = f"sinal_{angulo}graus_{TIMESTAMP_EXECUCAO}.xlsx"
+    df = pd.DataFrame({
+        "Mic1": mic1_raw,
+        "Mic2": mic2_raw,
+    })
+    df.to_excel(nome_arquivo, index=False)
+    print(f"[xlsx] Melhor bloco do ângulo {angulo}° salvo em: {nome_arquivo} "
+          f"(pico de correlação = {pico_valor:.4f})")
+    return nome_arquivo
 
-        # Remove offset DC (igual ao ESP32)
-        v1 -= np.mean(v1)
-        v2 -= np.mean(v2)
+# ==========================================================
+# LOOP PRINCIPAL DO EXPERIMENTO
+# ==========================================================
+resultados = []
 
-        # Normaliza (espelha a normalização do ESP32)
-        m1 = np.max(np.abs(v1)) or 1
-        m2 = np.max(np.abs(v2)) or 1
-        v1 /= m1
-        v2 /= m2
+print("\n===== INÍCIO DO EXPERIMENTO =====")
+print(f"Ângulos a testar: {ANGULOS}")
+print(f"Duração por ângulo: {DURACAO_TESTE_SEGUNDOS}s ({DURACAO_TESTE_SEGUNDOS/60:.1f} min)\n")
 
-        corr = np.correlate(v1, v2, mode="full")
+try:
+    for angulo in ANGULOS:
+        input(f">>> Posicione o microfone em {angulo}° e pressione ENTER para iniciar a coleta...")
+        print(f"Coletando dados para {angulo}°...")
 
-        corr_norm = corr / (np.max(np.abs(corr)) or 1)
+        posicoes_coletadas = []   # vetor com a posição (índice) onde ocorreu o pico da correlação, a cada bloco, nos 2 minutos
+        ultimo_aviso = time.time()
+        recebeu_algum_dado = False
 
-        line_corr.set_data(
-            np.arange(len(corr_norm)),
-            corr_norm
-        )
+        # ---- rastreio do "melhor" bloco deste ângulo (maior pico de correlação) ----
+        melhor_pico_valor = -np.inf
+        melhor_mic1_raw = None
+        melhor_mic2_raw = None
 
-        ax_corr.set_xlim(0, len(corr_norm))
+        # Ao iniciar um novo ângulo, descarta blocos antigos que ainda
+        # estejam nas filas (de antes do usuário posicionar o microfone),
+        # para não misturar dados de ângulos diferentes.
+        while not fila_mic1.empty():
+            fila_mic1.get_nowait()
+        while not fila_mic2.empty():
+            fila_mic2.get_nowait()
 
-        # =====================================================
-        # PICO = max_index_corr recebido do ESP32
-        # O ESP32 armazena em max_index_corr o índice
-        # absoluto no array de correlação (0..CORR_TAMANHO-1).
-        # ORIGINAL_LAG = max_index_corr - (N_AMOSTRAS - 1)
-        # Portanto: max_index_corr = lag + (N_AMOSTRAS - 1)
-        # =====================================================
-        if lag is not None:
-            max_index_corr = lag + (N_AMOSTRAS - 1)
-            vline_corr.set_xdata([max_index_corr])
+        inicio = time.time()
+        while True:
+            decorrido = time.time() - inicio
+            restante = DURACAO_TESTE_SEGUNDOS - decorrido
+            if restante <= 0:
+                break
 
-    # ==========================
-    # MEDIANA + HISTÓRICO
-    # ==========================
-    if lag is not None:
+            novo = False
+            # Só retira das filas quando AMBAS já têm pelo menos um bloco
+            # disponível. Isso garante que nenhum bloco é descartado: ele
+            # fica esperando na fila até o outro microfone também ter dado
+            # novo, em vez de ser sobrescrito.
+            if not fila_mic1.empty() and not fila_mic2.empty():
+                mic1 = fila_mic1.get()
+                mic2 = fila_mic2.get()
+                novo = True
 
-        # Converte lag para índice absoluto igual ao ESP32
-        max_index_corr = lag + (N_AMOSTRAS - 1)
+            if novo:
+                recebeu_algum_dado = True
 
-        buffer_mediana.append(max_index_corr)
-        pico_med = int(np.median(buffer_mediana))
-        historico_pico.append(pico_med)
+                if len(mic1) >= N_AMOSTRAS and len(mic2) >= N_AMOSTRAS:
+                    raw1 = mic1[:N_AMOSTRAS]
+                    raw2 = mic2[:N_AMOSTRAS]
+
+                    # ---- normalização do sinal antes da correlação ----
+                    Mic1 = normalizar(raw1)
+                    Mic2 = normalizar(raw2)
+
+                    corr = correlacao_cruzada(Mic1, Mic2)
+                    indice, valor_pico = encontrar_pico(corr)
+                    posicoes_coletadas.append(indice)
+
+                    # Bloco com maior pico de correlação até agora vira o
+                    # candidato a ser exportado para o .xlsx deste ângulo.
+                    if valor_pico > melhor_pico_valor:
+                        melhor_pico_valor = valor_pico
+                        melhor_mic1_raw = raw1
+                        melhor_mic2_raw = raw2
+
+                    escritor_bruto.writerow([
+                        angulo,
+                        datetime.now().isoformat(timespec="milliseconds"),
+                        indice,
+                    ])
+                    arquivo_bruto.flush()
+                else:
+                    print(f"[aviso] pacote recebido mas curto demais: len(mic1)={len(mic1)}, len(mic2)={len(mic2)} (precisa >= {N_AMOSTRAS})")
+
+                atualizar_grafico_ao_vivo(mic1, mic2, angulo, restante)
+            else:
+                plt.pause(0.01)
+
+            # aviso a cada 5s se nenhum dado novo chegou nesse intervalo
+            if time.time() - ultimo_aviso >= 5:
+                ultimo_aviso = time.time()
+                if not recebeu_algum_dado:
+                    print(f"[aviso] {restante:.0f}s restantes e ainda nenhum dado recebido de MIC1/MIC2 nesse ângulo. Verifique as portas seriais.")
+                print(f"[status] blocos processados até agora: {len(posicoes_coletadas)} "
+                      f"(pendentes na fila -> mic1: {fila_mic1.qsize()}, mic2: {fila_mic2.qsize()})")
+
+        # ---- Estatísticas consolidadas deste ângulo: apenas média e desvio padrão da posição do pico ----
+        media_pos = float(np.mean(posicoes_coletadas)) if posicoes_coletadas else 0.0
+        desvio_pos = float(np.std(posicoes_coletadas)) if posicoes_coletadas else 0.0
+
+        resultados.append({
+            "angulo_graus": angulo,
+            "n_blocos": len(posicoes_coletadas),
+            "media_posicao": media_pos,
+            "desvio_padrao_posicao": desvio_pos,
+        })
 
         print(
-            f"[PLOT] "
-            f"lag={lag} "
-            f"max_index={max_index_corr} "
-            f"mediana={pico_med}"
+            f"Concluído {angulo}° -> "
+            f"média da posição do pico = {media_pos:.4f} | "
+            f"desvio padrão = {desvio_pos:.4f} "
+            f"(n={len(posicoes_coletadas)} blocos)"
         )
 
-    # ==========================
-    # GRÁFICO HISTÓRICO
-    # ==========================
-    if len(historico_pico) > 0:
-        xs = np.arange(len(historico_pico))
-        ys = list(historico_pico)
-        line_historico.set_data(xs, ys)
-        ax_historico.set_xlim(0, max(100, len(historico_pico)))
-        margin = 5
-        ax_historico.set_ylim(
-            min(ys) - margin,
-            max(ys) + margin
-        )
+        # ---- Exporta o melhor bloco deste ângulo em .xlsx (formato do teste) ----
+        if melhor_mic1_raw is not None and melhor_mic2_raw is not None:
+            salvar_melhor_bloco_xlsx(angulo, melhor_mic1_raw, melhor_mic2_raw, melhor_pico_valor)
+        else:
+            print(f"[aviso] Nenhum bloco válido coletado em {angulo}° — .xlsx não gerado para este ângulo.")
 
-    return (
-        line_mic1,
-        line_mic2,
-        line_corr,
-        line_historico,
-        vline_corr,
-    )
+except KeyboardInterrupt:
+    print("\nExperimento interrompido pelo usuário.")
 
-# ==========================
-# ANIMAÇÃO
-# ==========================
-ani = animation.FuncAnimation(
-    fig,
-    update,
-    interval=50,
-    blit=False,
-    cache_frame_data=False,
-)
+finally:
+    arquivo_bruto.close()
+    print(f"[csv] Dados brutos salvos em: {ARQUIVO_BRUTO}")
 
-plt.tight_layout()
-plt.show()
+# ==========================================================
+# TABELA FINAL DE RESULTADOS
+# ==========================================================
+if resultados:
+    campos = ["angulo_graus", "n_blocos", "media_posicao", "desvio_padrao_posicao"]
+
+    with open(ARQUIVO_TABELA, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=campos)
+        writer.writeheader()
+        for r in resultados:
+            writer.writerow(r)
+
+    print(f"\n[csv] Tabela final salva em: {ARQUIVO_TABELA}\n")
+
+    # Exibe a tabela no console também
+    cabecalho = "{:<10}{:<10}{:<18}{:<18}".format(
+        "Ângulo", "N", "MédiaPosição", "DesvioPosição")
+    print(cabecalho)
+    print("-" * len(cabecalho))
+    for r in resultados:
+        print("{:<10}{:<10}{:<18.4f}{:<18.4f}".format(
+            r["angulo_graus"], r["n_blocos"], r["media_posicao"], r["desvio_padrao_posicao"]))
+
+    # ---- Gráfico final: posição média do pico x ângulo (com barra de erro) ----
+    angulos_plot = [r["angulo_graus"] for r in resultados]
+    medias_plot  = [r["media_posicao"] for r in resultados]
+    desvios_plot = [r["desvio_padrao_posicao"] for r in resultados]
+
+    plt.ioff()
+    fig2, ax2 = plt.subplots(figsize=(8, 5))
+    ax2.errorbar(angulos_plot, medias_plot, yerr=desvios_plot, fmt="o-", capsize=5, color="#1f77b4")
+    ax2.set_xlabel("Ângulo (graus)")
+    ax2.set_ylabel("Posição média do pico de correlação (índice)")
+    ax2.set_title("Posição média do pico por ângulo (barras = desvio padrão)")
+    ax2.grid(True)
+    plt.tight_layout()
+    plt.savefig(ARQUIVO_GRAFICO, dpi=150)
+    print(f"[png] Gráfico salvo em: {ARQUIVO_GRAFICO}")
+    plt.show()
+else:
+    print("Nenhum resultado coletado.")
